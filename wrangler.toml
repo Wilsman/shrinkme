@@ -1,0 +1,12 @@
+name = "shrinkme"
+version = "0.1.0"
+main = "./.next/server/index.js" # Or the appropriate entry point
+compatibility_date = "2023-01-01"
+
+[build]
+command = "npx next build"
+cwd = "."
+publish = "./.next" # Or potentially a subdirectory within .next
+
+[assets]
+upload = "./.next/static"
