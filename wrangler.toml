@@ -1,26 +1,4 @@
 name = "shrinkme"
 compatibility_date = "2024-09-23"
-
-[build]
-command = "npx next build"
-cwd = "."
-publish = "./.next"
-
-[assets]
-upload = [
-    { binding = "STATIC_CONTENT", path = "./.next/static" }
-]
-
-[env.production]
-name = "shrinkme-production"
-account_id = "your-account-id"
-workers_dev = false
-route = "your-production-domain/*"
-zone_id = "your-zone-id"
-
-[env.staging]
-name = "shrinkme-staging"
-account_id = "your-account-id"
-workers_dev = true
-route = ""
-zone_id = ""
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"
