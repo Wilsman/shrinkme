@@ -1,12 +1,26 @@
 name = "shrinkme"
-version = "0.1.0"
-main = "./.next/server/index.js" # Or the appropriate entry point
-compatibility_date = "2023-01-01"
+compatibility_date = "2024-09-23"
 
 [build]
 command = "npx next build"
 cwd = "."
-publish = "./.next" # Or potentially a subdirectory within .next
+publish = "./.next"
 
 [assets]
-upload = "./.next/static"
+upload = [
+    { binding = "STATIC_CONTENT", path = "./.next/static" }
+]
+
+[env.production]
+name = "shrinkme-production"
+account_id = "your-account-id"
+workers_dev = false
+route = "your-production-domain/*"
+zone_id = "your-zone-id"
+
+[env.staging]
+name = "shrinkme-staging"
+account_id = "your-account-id"
+workers_dev = true
+route = ""
+zone_id = ""
