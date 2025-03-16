@@ -5,8 +5,6 @@ try {
   // ignore error
 }
 
-import { setupDevPlatform } from '@cloudflare/next-on-pages/next-dev';
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -23,10 +21,6 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
-}
-
-if (process.env.NODE_ENV === 'development') {
-  await setupDevPlatform();
 }
 
 mergeConfig(nextConfig, userConfig)

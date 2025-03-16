@@ -8,7 +8,8 @@ import { Progress } from "@/components/ui/progress"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Download, Upload, AlertCircle } from "lucide-react"
+import { Slider } from "@/components/ui/slider"
+import { Download, Upload, AlertCircle, Scissors, RotateCcw, Play, Pause, SkipForward, SkipBack } from "lucide-react"
 import { formatFileSize } from "@/lib/utils"
 
 export function VideoCompressor() {
@@ -20,14 +21,95 @@ export function VideoCompressor() {
   const [compressedVideo, setCompressedVideo] = useState<string | null>(null)
   const [originalSize, setOriginalSize] = useState<number | null>(null)
   const [compressedSize, setCompressedSize] = useState<number | null>(null)
+  const [videoDuration, setVideoDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [trimStart, setTrimStart] = useState(0)
+  const [trimEnd, setTrimEnd] = useState(0)
+  const [showTrimmer, setShowTrimmer] = useState(false)
+  const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const videoPreviewRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
     // Set ready state immediately since we're using browser APIs
     setIsReady(true)
-  }, [])
+
+    // Cleanup function to revoke object URLs when component unmounts
+    return () => {
+      if (videoObjectUrl) {
+        URL.revokeObjectURL(videoObjectUrl)
+      }
+      if (compressedVideo) {
+        URL.revokeObjectURL(compressedVideo)
+      }
+    }
+  }, [videoObjectUrl, compressedVideo])
+
+  // Handle video playback in the trimmer
+  useEffect(() => {
+    const videoElement = videoPreviewRef.current
+    if (!videoElement) return
+
+    const handleTimeUpdate = () => {
+      const newTime = videoElement.currentTime
+      setCurrentTime(newTime)
+
+      // If video reaches trim end during playback, loop back to trim start
+      if (isPlaying && newTime >= trimEnd) {
+        videoElement.currentTime = trimStart
+      }
+    }
+
+    const handleLoadedMetadata = () => {
+      const duration = videoElement.duration
+      setVideoDuration(duration)
+      // Only set trim values if they haven't been set yet or are invalid
+      if (trimStart === 0 && trimEnd === 0) {
+        setTrimStart(0)
+        setTrimEnd(duration)
+      }
+      // Ensure current time is within trim bounds
+      if (videoElement.currentTime < trimStart || videoElement.currentTime > trimEnd) {
+        videoElement.currentTime = trimStart
+      }
+    }
+
+    videoElement.addEventListener("timeupdate", handleTimeUpdate)
+    videoElement.addEventListener("loadedmetadata", handleLoadedMetadata)
+
+    // If video is already loaded, call handleLoadedMetadata immediately
+    if (videoElement.readyState >= 2) {
+      handleLoadedMetadata()
+    }
+
+    return () => {
+      videoElement.removeEventListener("timeupdate", handleTimeUpdate)
+      videoElement.removeEventListener("loadedmetadata", handleLoadedMetadata)
+    }
+  }, [isPlaying, trimStart, trimEnd])
+
+  // Control video playback based on isPlaying state
+  useEffect(() => {
+    const videoElement = videoPreviewRef.current
+    if (!videoElement) return
+
+    if (isPlaying) {
+      // If at the end of trim range, go back to start
+      if (videoElement.currentTime >= trimEnd) {
+        videoElement.currentTime = trimStart
+      }
+
+      videoElement.play().catch((err) => {
+        console.error("Error playing video:", err)
+        setIsPlaying(false)
+      })
+    } else {
+      videoElement.pause()
+    }
+  }, [isPlaying, trimStart, trimEnd])
 
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,17 +122,109 @@ export function VideoCompressor() {
         return
       }
 
+      // Revoke previous object URL if exists
+      if (videoObjectUrl) {
+        URL.revokeObjectURL(videoObjectUrl)
+      }
+
+      // Create new object URL
+      const objectUrl = URL.createObjectURL(file)
+      setVideoObjectUrl(objectUrl)
+
       setOriginalVideo(file)
       setOriginalSize(file.size)
       setCompressedVideo(null)
       setCompressedSize(null)
       setError(null)
+      setShowTrimmer(false)
+
+      // Reset trimming values
+      setCurrentTime(0)
+      setTrimStart(0)
+      setTrimEnd(0)
+      setIsPlaying(false)
     }
+  }
+
+  // Format time in MM:SS.ms format
+  const formatTime = (timeInSeconds: number) => {
+    const minutes = Math.floor(timeInSeconds / 60)
+    const seconds = Math.floor(timeInSeconds % 60)
+    const milliseconds = Math.floor((timeInSeconds % 1) * 100)
+
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${milliseconds.toString().padStart(2, "0")}`
+  }
+
+  // Handle trim range change
+  const handleTrimRangeChange = (values: number[]) => {
+    if (!videoPreviewRef.current || values.length !== 2) return
+
+    const minTrimDuration = 0.1 // Minimum 100ms trim duration
+    const duration = videoPreviewRef.current.duration
+
+    let [newStart, newEnd] = values
+
+    // Ensure valid bounds
+    newStart = Math.max(0, Math.min(newStart, duration - minTrimDuration))
+    newEnd = Math.min(duration, Math.max(newEnd, newStart + minTrimDuration))
+
+    setTrimStart(newStart)
+    setTrimEnd(newEnd)
+
+    // Adjust current time if it's outside new trim bounds
+    const videoElement = videoPreviewRef.current
+    if (videoElement.currentTime < newStart) {
+      videoElement.currentTime = newStart
+    } else if (videoElement.currentTime > newEnd) {
+      videoElement.currentTime = newEnd
+    }
+  }
+
+  // Handle seeking to a specific time
+  const handleSeek = (time: number) => {
+    const videoElement = videoPreviewRef.current
+    if (!videoElement) return
+
+    // Ensure time is within video bounds
+    const clampedTime = Math.max(0, Math.min(time, videoElement.duration))
+    // Ensure time is within trim bounds
+    const boundedTime = Math.max(trimStart, Math.min(trimEnd, clampedTime))
+    
+    videoElement.currentTime = boundedTime
+    setCurrentTime(boundedTime)
+  }
+
+  // Handle frame-by-frame navigation (approximately 1/30th of a second)
+  const handleFrameStep = (forward: boolean) => {
+    const videoElement = videoPreviewRef.current
+    if (videoElement) {
+      const frameTime = 1 / 30 // Assuming 30fps
+      const newTime = forward
+        ? Math.min(trimEnd, currentTime + frameTime)
+        : Math.max(trimStart, currentTime - frameTime)
+
+      videoElement.currentTime = newTime
+    }
+  }
+
+  // Toggle play/pause
+  const togglePlayPause = () => {
+    setIsPlaying(!isPlaying)
+  }
+
+  // Reset trim to full video
+  const resetTrim = () => {
+    const videoElement = videoPreviewRef.current
+    if (!videoElement) return
+
+    setTrimStart(0)
+    setTrimEnd(videoElement.duration)
+    handleSeek(0)
   }
 
   // Compress the video using MediaRecorder
   const compressVideo = async () => {
-    if (!originalVideo) return
+    if (!originalVideo || !videoObjectUrl) return
 
     try {
       setIsCompressing(true)
@@ -61,23 +235,23 @@ export function VideoCompressor() {
       const video = document.createElement("video")
       video.crossOrigin = "anonymous"
 
-      // Create a URL for the video
-      const videoURL = URL.createObjectURL(originalVideo)
-
       // Set up video element
-      video.src = videoURL
+      video.src = videoObjectUrl
       video.muted = true
 
       // Wait for video metadata to load
       await new Promise<void>((resolve) => {
         video.onloadedmetadata = () => {
-          video.currentTime = 0 // Ensure we start at the beginning
+          video.currentTime = trimStart // Start at trim point
           resolve()
         }
       })
 
-      // Get video dimensions and duration
-      const { videoWidth, videoHeight, duration } = video
+      // Get video dimensions
+      const { videoWidth, videoHeight } = video
+
+      // Calculate effective duration (after trimming)
+      const effectiveDuration = trimEnd - trimStart
 
       // Target size: 9.9MB in bits (slightly under to ensure we stay below 10MB)
       const TARGET_SIZE_BITS = 9.9 * 8 * 1024 * 1024
@@ -85,12 +259,12 @@ export function VideoCompressor() {
       // Calculate target bitrate based on duration to achieve ~10MB file
       // Reserve 20% for audio and container overhead
       const videoTargetBits = TARGET_SIZE_BITS * 0.8
-      const targetVideoBitrate = Math.floor(videoTargetBits / duration)
+      const targetVideoBitrate = Math.floor(videoTargetBits / effectiveDuration)
 
       // Ensure minimum quality (300kbps) and maximum quality (5Mbps)
       const videoBitsPerSecond = Math.max(300000, Math.min(targetVideoBitrate, 5000000))
 
-      console.log(`Video duration: ${duration}s, Target bitrate: ${videoBitsPerSecond / 1000}kbps`)
+      console.log(`Trimmed duration: ${effectiveDuration}s, Target bitrate: ${videoBitsPerSecond / 1000}kbps`)
 
       // Calculate target resolution based on bitrate
       // Higher bitrate allows for higher resolution
@@ -145,9 +319,6 @@ export function VideoCompressor() {
         throw new Error("Could not get canvas context")
       }
 
-      // Improved approach: Use requestVideoFrameCallback if available for better frame timing
-      // or fallback to standard playback with MediaRecorder
-
       // Determine original video framerate (default to 30fps if can't be determined)
       let fps = 30
 
@@ -161,7 +332,7 @@ export function VideoCompressor() {
         if ("getVideoPlaybackQuality" in video) {
           const quality = (video as any).getVideoPlaybackQuality()
           if (quality && quality.totalVideoFrames > 0) {
-            fps = Math.min(60, Math.max(24, Math.round(quality.totalVideoFrames / duration)))
+            fps = Math.min(60, Math.max(24, Math.round(quality.totalVideoFrames / video.duration)))
           }
         }
       } catch (e) {
@@ -176,7 +347,7 @@ export function VideoCompressor() {
       // IMPROVED AUDIO HANDLING
       // Create a new audio element to extract audio
       const audioElement = document.createElement("audio")
-      audioElement.src = videoURL
+      audioElement.src = videoObjectUrl
       audioElement.muted = false
 
       // Create audio context and connect it to the stream
@@ -196,7 +367,7 @@ export function VideoCompressor() {
       })
 
       // Audio bitrate based on video length (longer videos get lower audio bitrate)
-      const audioBitsPerSecond = duration > 60 ? 96000 : 128000
+      const audioBitsPerSecond = effectiveDuration > 60 ? 96000 : 128000
 
       // Configure MediaRecorder with calculated quality
       const options = {
@@ -239,7 +410,6 @@ export function VideoCompressor() {
         // Clean up
         audioElement.pause()
         video.pause()
-        URL.revokeObjectURL(videoURL)
 
         // Close audio context
         audioCtx.close()
@@ -256,22 +426,25 @@ export function VideoCompressor() {
       const drawFrame = () => {
         ctx.drawImage(video, 0, 0, targetWidth, targetHeight)
 
-        // Update progress based on current time
-        const progressPercent = Math.min(100, Math.round((video.currentTime / duration) * 100))
+        // Update progress based on current time relative to trim range
+        const progressPercent = Math.min(100, Math.round(((video.currentTime - trimStart) / effectiveDuration) * 100))
         setProgress(progressPercent)
 
-        // Continue drawing frames until the video ends
-        if (!video.ended && !video.paused) {
+        // Continue drawing frames until we reach the trim end
+        if (!video.ended && !video.paused && video.currentTime < trimEnd) {
           requestAnimationFrame(drawFrame)
+        } else if (video.currentTime >= trimEnd) {
+          // Reached the end of the trim range
+          mediaRecorder.stop()
         } else {
-          // Video playback ended
+          // Video playback ended or paused unexpectedly
           mediaRecorder.stop()
         }
       }
 
-      // Start playback of both video and audio
-      video.currentTime = 0
-      audioElement.currentTime = 0
+      // Start playback of both video and audio from trim start
+      video.currentTime = trimStart
+      audioElement.currentTime = trimStart
 
       // Play both elements
       const playPromises = [video.play(), audioElement.play()]
@@ -281,11 +454,6 @@ export function VideoCompressor() {
 
       // Start drawing frames
       drawFrame()
-
-      // Set up ended event to stop recording when video ends
-      video.onended = () => {
-        mediaRecorder.stop()
-      }
     } catch (err) {
       setError("Failed to compress video. Please try again with a different file.")
       console.error(err)
@@ -310,6 +478,16 @@ export function VideoCompressor() {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+  }
+
+  // Toggle trimmer visibility
+  const toggleTrimmer = () => {
+    setShowTrimmer(!showTrimmer)
+
+    // If showing trimmer, ensure video is paused
+    if (!showTrimmer) {
+      setIsPlaying(false)
+    }
   }
 
   return (
@@ -344,6 +522,119 @@ export function VideoCompressor() {
               {originalSize && (
                 <div className="text-center text-sm text-muted-foreground">
                   Original size: {formatFileSize(originalSize)}
+                </div>
+              )}
+
+              {/* Video Trimmer */}
+              {originalVideo && videoObjectUrl && !compressedVideo && !isCompressing && (
+                <div className="space-y-2">
+                  <Button
+                    onClick={toggleTrimmer}
+                    variant="outline"
+                    className="w-full flex items-center justify-center gap-2"
+                  >
+                    <Scissors className="h-4 w-4" />
+                    {showTrimmer ? "Hide Trimmer" : "Trim Video"}
+                  </Button>
+
+                  {showTrimmer && (
+                    <div className="space-y-4 p-4 border rounded-lg">
+                      <div className="aspect-video bg-black rounded-lg overflow-hidden">
+                        <video
+                          ref={videoPreviewRef}
+                          src={videoObjectUrl}
+                          className="w-full h-full"
+                          onClick={togglePlayPause}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        {/* Current time display */}
+                        <div className="flex justify-between text-sm">
+                          <span>Current: {formatTime(currentTime)}</span>
+                          <span>Duration: {formatTime(videoDuration)}</span>
+                        </div>
+
+                        {/* Playback controls */}
+                        <div className="flex justify-center gap-2">
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => handleFrameStep(false)}
+                            title="Previous frame"
+                          >
+                            <SkipBack className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" variant="outline" onClick={togglePlayPause}>
+                            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="outline"
+                            onClick={() => handleFrameStep(true)}
+                            title="Next frame"
+                          >
+                            <SkipForward className="h-4 w-4" />
+                          </Button>
+                          <Button size="icon" variant="outline" onClick={resetTrim} title="Reset trim">
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        </div>
+
+                        {/* Timeline slider */}
+                        <div className="space-y-4">
+                          <div className="relative pt-1">
+                            <div className="flex items-center justify-center h-2">
+                              <div className="absolute w-full">
+                                <Slider
+                                  value={[trimStart, trimEnd]}
+                                  min={0}
+                                  max={videoDuration || 100} // Fallback to 100 if duration not loaded
+                                  step={0.01}
+                                  minStepsBetweenThumbs={0.1}
+                                  onValueChange={handleTrimRangeChange}
+                                  disabled={!videoDuration}
+                                  className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Playback position indicator */}
+                          <div 
+                            className="relative w-full h-1 bg-gray-200 dark:bg-gray-800 cursor-pointer"
+                            onClick={(e) => {
+                              const rect = e.currentTarget.getBoundingClientRect()
+                              const pos = (e.clientX - rect.left) / rect.width
+                              handleSeek(pos * videoDuration)
+                            }}
+                          >
+                            <div
+                              className="absolute h-full bg-primary/30"
+                              style={{
+                                left: `${(trimStart / videoDuration) * 100}%`,
+                                width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
+                              }}
+                            />
+                            <div
+                              className="absolute w-1 h-3 bg-primary -top-1"
+                              style={{
+                                left: `${(currentTime / videoDuration) * 100}%`,
+                                transform: 'translateX(-50%)',
+                              }}
+                            />
+                          </div>
+
+                          {/* Trim range display */}
+                          <div className="flex justify-between text-xs text-muted-foreground">
+                            <span>Start: {formatTime(trimStart)}</span>
+                            <span>Duration: {formatTime(trimEnd - trimStart)}</span>
+                            <span>End: {formatTime(trimEnd)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -394,7 +685,7 @@ export function VideoCompressor() {
               <TabsTrigger value="compressed">Compressed</TabsTrigger>
             </TabsList>
             <TabsContent value="original" className="mt-4">
-              <video src={URL.createObjectURL(originalVideo)} controls className="w-full rounded-lg" />
+              <video src={videoObjectUrl!} controls className="w-full rounded-lg" />
             </TabsContent>
             <TabsContent value="compressed" className="mt-4">
               <video src={compressedVideo} controls className="w-full rounded-lg" />
