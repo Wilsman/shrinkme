@@ -745,6 +745,7 @@ export function VideoCompressor() {
                             src={videoObjectUrl}
                             className="w-full h-full"
                             onClick={togglePlayPause}
+                            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                           />
                         </div>
 
@@ -794,49 +795,36 @@ export function VideoCompressor() {
                             </Button>
                           </div>
 
-                          {/* Timeline slider */}
-                          <div className="space-y-4">
-                            <div className="relative pt-1">
-                              <div className="flex items-center justify-center h-2">
-                                <div className="absolute w-full">
-                                  <Slider
-                                    value={[trimStart, trimEnd]}
-                                    min={0}
-                                    max={videoDuration || 100} // Fallback to 100 if duration not loaded
-                                    step={0.01}
-                                    minStepsBetweenThumbs={0.1}
-                                    onValueChange={handleTrimRangeChange}
-                                    disabled={!videoDuration}
-                                    className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Playback position indicator */}
+                          {/* Combined Timeline */}
+                          <div className="space-y-2">
+                            {/* Single combined timeline container */}
                             <div
-                              className="relative w-full h-1 bg-gray-200 dark:bg-gray-800 cursor-pointer"
+                              className="relative w-full cursor-pointer py-2"
                               onPointerDown={handleTimelinePointerDown}
                             >
-                              <div
-                                className="absolute h-full bg-primary/30"
-                                style={{
-                                  left: `${(trimStart / videoDuration) * 100}%`,
-                                  width: `${
-                                    ((trimEnd - trimStart) / videoDuration) *
-                                    100
-                                  }%`,
-                                }}
+                              {/* Range slider for trimStart & trimEnd */}
+                              <Slider
+                                value={[trimStart, trimEnd]}
+                                min={0}
+                                max={videoDuration || 100}
+                                step={0.01}
+                                minStepsBetweenThumbs={0.1}
+                                onValueChange={handleTrimRangeChange}
+                                disabled={!videoDuration}
+                                // Add some margin to visually separate thumbs from pointer
+                                className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4"
                               />
-                              <div
-                                className="absolute w-1 h-3 bg-primary -top-1"
-                                style={{
-                                  left: `${
-                                    (currentTime / videoDuration) * 100
-                                  }%`,
-                                  transform: "translateX(-50%)",
-                                }}
-                              />
+
+                              {/* Current-time pointer (absolute overlay) */}
+                              {videoDuration > 0 && (
+                                <div
+                                  className="pointer-events-none absolute top-1/2 z-10 h-8 w-1 -translate-x-1/2 -translate-y-1/2 bg-primary"
+                                  style={{
+                                    left: `${(currentTime / videoDuration) * 100}%`,
+                                    // transform: "translateX(-50%) translateY(-50%)", // Use translate classes
+                                  }}
+                                />
+                              )}
                             </div>
 
                             {/* Trim range display */}
