@@ -88,46 +88,23 @@ export function VideoCompressor() {
     const videoElement = videoPreviewRef.current;
     if (!videoElement) return;
 
-    const handleTimeUpdate = () => {
-      const newTime = videoElement.currentTime;
-      setCurrentTime(newTime);
-
-      // If video reaches trim end during playback, loop back to trim start
-      if (isPlaying && newTime >= trimEnd) {
-        videoElement.currentTime = trimStart;
-      }
-    };
-
     const handleLoadedMetadata = () => {
       const duration = videoElement.duration;
       setVideoDuration(duration);
-      // Only set trim values if they haven't been set yet or are invalid
-      if (trimStart === 0 && trimEnd === 0) {
-        setTrimStart(0);
-        setTrimEnd(duration);
-      }
-      // Ensure current time is within trim bounds
-      if (
-        videoElement.currentTime < trimStart ||
-        videoElement.currentTime > trimEnd
-      ) {
-        videoElement.currentTime = trimStart;
-      }
+      // Set trim values to full duration on initial load
+      setTrimStart(0);
+      setTrimEnd(duration);
+      videoElement.currentTime = 0;
     };
-
-    videoElement.addEventListener("timeupdate", handleTimeUpdate);
     videoElement.addEventListener("loadedmetadata", handleLoadedMetadata);
-
-    // If video is already loaded, call handleLoadedMetadata immediately
+    // If metadata is already available, call it immediately.
     if (videoElement.readyState >= 2) {
       handleLoadedMetadata();
     }
-
     return () => {
-      videoElement.removeEventListener("timeupdate", handleTimeUpdate);
       videoElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
     };
-  }, [isPlaying, trimStart, trimEnd]);
+  }, [videoObjectUrl]);
 
   // Control video playback based on isPlaying state
   useEffect(() => {
@@ -187,10 +164,11 @@ export function VideoCompressor() {
       setCompressedSize(null);
       setError(null);
 
-      // Reset trimming values
+      // Reset trimming values - only set start to 0, don't set end yet
+      // The end will be set when metadata is loaded
       setCurrentTime(0);
       setTrimStart(0);
-      setTrimEnd(0);
+      // Don't set trimEnd to 0 here, as it will be set to video duration in handleLoadedMetadata
       setIsPlaying(false);
     }
   };
@@ -245,6 +223,35 @@ export function VideoCompressor() {
     setCurrentTime(boundedTime);
   };
 
+  // Handle timeline pointer interaction for smooth scrubbing
+  const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const timelineRect = e.currentTarget.getBoundingClientRect();
+
+    const updateCurrentTime = (clientX: number) => {
+      const pos = (clientX - timelineRect.left) / timelineRect.width;
+      const newTime = Math.max(
+        trimStart,
+        Math.min(trimEnd, pos * videoDuration)
+      );
+      handleSeek(newTime);
+    };
+
+    // Update immediately on pointer down
+    updateCurrentTime(e.clientX);
+
+    const handlePointerMove = (event: PointerEvent) => {
+      updateCurrentTime(event.clientX);
+    };
+
+    const handlePointerUp = () => {
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
+    };
+
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
+  };
+
   // Handle frame-by-frame navigation (approximately 1/30th of a second)
   const handleFrameStep = (forward: boolean) => {
     const videoElement = videoPreviewRef.current;
@@ -275,34 +282,96 @@ export function VideoCompressor() {
 
   // Compress the video using MediaRecorder
   const compressVideo = async () => {
-    if (!originalVideo || !videoObjectUrl) return;
+    if (!originalVideo || !videoPreviewRef.current) {
+      setError("Please select a video file first.");
+      return;
+    }
+
+    setIsCompressing(true);
+    setError(null);
+    setCompressedVideo(null);
+    setCompressedSize(null);
+    setProgress(0);
+
+    const video = videoPreviewRef.current;
 
     try {
-      setIsCompressing(true);
-      setProgress(0);
-      setError(null);
-
-      // Create video element to load the original video
-      const video = document.createElement("video");
-      video.crossOrigin = "anonymous";
-
-      // Set up video element
-      video.src = videoObjectUrl;
-      video.muted = true;
-
-      // Wait for video metadata to load
-      await new Promise<void>((resolve) => {
-        video.onloadedmetadata = () => {
-          video.currentTime = trimStart; // Start at trim point
-          resolve();
-        };
-      });
+      // --- WAIT FOR METADATA ---
+      if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
+        console.log("Waiting for video metadata...");
+        await new Promise<void>((resolve, reject) => {
+          const onLoadedMetadata = () => {
+            video.removeEventListener("loadedmetadata", onLoadedMetadata);
+            video.removeEventListener("error", onError);
+            console.log("Metadata loaded.");
+            resolve();
+          };
+          const onError = (e: Event | string) => {
+            video.removeEventListener("loadedmetadata", onLoadedMetadata);
+            video.removeEventListener("error", onError);
+            console.error("Error loading video metadata:", e);
+            reject(new Error("Failed to load video metadata"));
+          };
+          video.addEventListener("loadedmetadata", onLoadedMetadata);
+          video.addEventListener("error", onError);
+        });
+      }
+      // Now we are sure video.duration is available
+      const currentVideoDuration = video.duration;
+      // --- END WAIT ---
 
       // Get video dimensions
       const { videoWidth, videoHeight } = video;
 
-      // Calculate effective duration (after trimming)
-      const effectiveDuration = trimEnd - trimStart;
+      // Validate trim values and set to actual video bounds if invalid
+      let actualStartTime = trimStart;
+      let actualEndTime = trimEnd;
+
+      // Reset to full video if values are invalid
+      if (
+        trimStart === trimEnd ||
+        trimStart > trimEnd ||
+        trimEnd <= 0 ||
+        trimEnd > currentVideoDuration
+      ) {
+        console.log(
+          "Invalid trim values detected, resetting to full video duration"
+        );
+        actualStartTime = 0;
+        actualEndTime = currentVideoDuration;
+
+        // Also update the state values for UI consistency
+        setTrimStart(actualStartTime);
+        setTrimEnd(actualEndTime);
+      }
+
+      const effectiveDuration = actualEndTime - actualStartTime;
+
+      // Double-check effective duration
+      if (effectiveDuration <= 0) {
+        console.error(
+          "Final calculated duration is still invalid. Forcing to full video duration.",
+          "Start:",
+          actualStartTime,
+          "End:",
+          actualEndTime,
+          "Video Duration:",
+          currentVideoDuration
+        );
+
+        // Force to full video as last resort
+        actualStartTime = 0;
+        actualEndTime = currentVideoDuration;
+        setTrimStart(actualStartTime);
+        setTrimEnd(actualEndTime);
+      }
+
+      // Recalculate with final values
+      const finalEffectiveDuration = actualEndTime - actualStartTime;
+
+      console.log(
+        `Using final trim values - Start: ${actualStartTime}s, End: ${actualEndTime}s, Duration: ${finalEffectiveDuration}s`
+      );
 
       // Target size: 9.9MB in bits (slightly under to ensure we stay below 10MB)
       const TARGET_SIZE_BITS = 9.9 * 8 * 1024 * 1024;
@@ -311,7 +380,7 @@ export function VideoCompressor() {
       // Reserve 20% for audio and container overhead
       const videoTargetBits = TARGET_SIZE_BITS * 0.8;
       const targetVideoBitrate = Math.floor(
-        videoTargetBits / effectiveDuration
+        videoTargetBits / finalEffectiveDuration
       );
 
       // Ensure minimum quality (300kbps) and maximum quality (5Mbps)
@@ -321,7 +390,7 @@ export function VideoCompressor() {
       );
 
       console.log(
-        `Trimmed duration: ${effectiveDuration}s, Target bitrate: ${
+        `Trimmed duration: ${finalEffectiveDuration}s, Target bitrate: ${
           videoBitsPerSecond / 1000
         }kbps`
       );
@@ -413,7 +482,7 @@ export function VideoCompressor() {
       // IMPROVED AUDIO HANDLING
       // Create a new audio element to extract audio
       const audioElement = document.createElement("audio");
-      audioElement.src = videoObjectUrl;
+      audioElement.src = videoObjectUrl!;
       audioElement.muted = false;
 
       // Create audio context and connect it to the stream
@@ -433,7 +502,7 @@ export function VideoCompressor() {
       });
 
       // Audio bitrate based on video length (longer videos get lower audio bitrate)
-      const audioBitsPerSecond = effectiveDuration > 60 ? 96000 : 128000;
+      const audioBitsPerSecond = finalEffectiveDuration > 60 ? 96000 : 128000;
 
       // Configure MediaRecorder with calculated quality
       const options = {
@@ -455,8 +524,12 @@ export function VideoCompressor() {
       };
 
       mediaRecorder.onstop = () => {
-        // Create compressed video blob
-        const blob = new Blob(chunks, { type: "video/webm" });
+        // Determine the correct MIME type for the final blob
+        const finalMimeType =
+          outputFormat === "mp4-h264" ? "video/mp4" : "video/webm";
+
+        // Create compressed video blob with the correct type
+        const blob = new Blob(chunks, { type: finalMimeType });
         const compressedUrl = URL.createObjectURL(blob);
 
         // Check if we're under 10MB
@@ -504,7 +577,7 @@ export function VideoCompressor() {
         const progressPercent = Math.min(
           100,
           Math.round(
-            ((video.currentTime - trimStart) / effectiveDuration) * 100
+            ((video.currentTime - trimStart) / finalEffectiveDuration) * 100
           )
         );
         setProgress(progressPercent);
@@ -743,13 +816,7 @@ export function VideoCompressor() {
                             {/* Playback position indicator */}
                             <div
                               className="relative w-full h-1 bg-gray-200 dark:bg-gray-800 cursor-pointer"
-                              onClick={(e) => {
-                                const rect =
-                                  e.currentTarget.getBoundingClientRect();
-                                const pos =
-                                  (e.clientX - rect.left) / rect.width;
-                                handleSeek(pos * videoDuration);
-                              }}
+                              onPointerDown={handleTimelinePointerDown}
                             >
                               <div
                                 className="absolute h-full bg-primary/30"
