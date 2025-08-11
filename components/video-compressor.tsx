@@ -292,10 +292,18 @@ export function VideoCompressor() {
     setCompressedVideo(null);
     setCompressedSize(null);
     setProgress(0);
+    // Ensure preview playback is stopped while compressing
+    setIsPlaying(false);
 
     const video = videoPreviewRef.current;
 
     try {
+      // Preserve current mute/volume and mute during compression to avoid audible playback
+      const previousVideoMuted = video.muted;
+      const previousVideoVolume = video.volume;
+      video.muted = true;
+      video.volume = 0;
+
       // --- WAIT FOR METADATA ---
       if (video.readyState < HTMLMediaElement.HAVE_METADATA) {
         console.log("Waiting for video metadata...");
@@ -373,20 +381,20 @@ export function VideoCompressor() {
         `Using final trim values - Start: ${actualStartTime}s, End: ${actualEndTime}s, Duration: ${finalEffectiveDuration}s`
       );
 
-      // Target size: 9.9MB in bits (slightly under to ensure we stay below 10MB)
-      const TARGET_SIZE_BITS = 9.9 * 8 * 1024 * 1024;
+      // Target size: 9.3MB in bits (more conservative to ensure we stay below 10MB)
+      const TARGET_SIZE_BITS = 9.3 * 8 * 1024 * 1024;
 
       // Calculate target bitrate based on duration to achieve ~10MB file
-      // Reserve 20% for audio and container overhead
-      const videoTargetBits = TARGET_SIZE_BITS * 0.8;
+      // Reserve ~35% for audio and container overhead
+      const videoTargetBits = TARGET_SIZE_BITS * 0.65;
       const targetVideoBitrate = Math.floor(
         videoTargetBits / finalEffectiveDuration
       );
 
-      // Ensure minimum quality (300kbps) and maximum quality (5Mbps)
+      // Ensure minimum quality (300kbps) and maximum quality (3.5Mbps)
       const videoBitsPerSecond = Math.max(
         300000,
-        Math.min(targetVideoBitrate, 5000000)
+        Math.min(targetVideoBitrate, 3500000)
       );
 
       console.log(
@@ -483,7 +491,8 @@ export function VideoCompressor() {
       // Create a new audio element to extract audio
       const audioElement = document.createElement("audio");
       audioElement.src = videoObjectUrl!;
-      audioElement.muted = false;
+      // Keep audio track in the recording but do not play it to the user
+      audioElement.muted = true;
 
       // Create audio context and connect it to the stream
       const audioCtx = new AudioContext();
@@ -493,8 +502,7 @@ export function VideoCompressor() {
       const audioSource = audioCtx.createMediaElementSource(audioElement);
       audioSource.connect(audioDestination);
 
-      // Also connect to audio context destination so we can hear it (optional)
-      audioSource.connect(audioCtx.destination);
+      // Intentionally DO NOT connect to audioCtx.destination to avoid audible playback during compression
 
       // Add all audio tracks to the stream
       audioDestination.stream.getAudioTracks().forEach((track) => {
@@ -556,7 +564,12 @@ export function VideoCompressor() {
 
         // Clean up
         audioElement.pause();
+        audioElement.src = "";
+        audioElement.remove();
         video.pause();
+        // Restore previous mute/volume state
+        video.muted = previousVideoMuted;
+        video.volume = previousVideoVolume;
 
         // Close audio context
         audioCtx.close();
@@ -637,9 +650,11 @@ export function VideoCompressor() {
   };
 
   return (
-    <Card className="w-full">
+    <Card className="w-full overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/20">
       <CardHeader>
-        <CardTitle>Video Compression Tool</CardTitle>
+        <CardTitle className="bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
+          Video Compression Tool
+        </CardTitle>
       </CardHeader>
       <CardContent>
         {/* Wrap all CardContent children in a single div */}
@@ -652,7 +667,7 @@ export function VideoCompressor() {
           )}
           {/* Wrap main content and tabs in a fragment */}
           <div
-            className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-muted-foreground/25 rounded-lg hover:border-primary transition-colors"
+            className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl hover:border-primary transition-colors bg-muted/20 ring-1 ring-border"
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -739,11 +754,12 @@ export function VideoCompressor() {
                   !isCompressing && (
                     <div className="space-y-2">
                       <div className="space-y-4 p-4 border rounded-lg">
-                        <div className="aspect-video bg-black rounded-lg overflow-hidden">
+                        <div className="aspect-video bg-black rounded-xl overflow-hidden ring-1 ring-border">
                           <video
                             ref={videoPreviewRef}
                             src={videoObjectUrl}
                             className="w-full h-full"
+                            playsInline
                             onClick={togglePlayPause}
                             onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                           />
@@ -811,7 +827,7 @@ export function VideoCompressor() {
                                 minStepsBetweenThumbs={0.1}
                                 onValueChange={handleTrimRangeChange}
                                 disabled={!videoDuration}
-                                // Add some margin to visually separate thumbs from pointer
+                                // Thicker track and larger thumbs
                                 className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4"
                               />
 
@@ -912,6 +928,7 @@ export function VideoCompressor() {
                   src={videoObjectUrl!}
                   controls
                   className="w-full rounded-lg"
+                  playsInline
                 />
               </TabsContent>
               <TabsContent value="compressed" className="mt-4">
@@ -919,6 +936,7 @@ export function VideoCompressor() {
                   src={compressedVideo}
                   controls
                   className="w-full rounded-lg"
+                  playsInline
                 />
               </TabsContent>
             </Tabs>
