@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Slider } from "@/components/ui/slider";
 import {
   Download,
   Upload,
@@ -27,6 +26,7 @@ import {
   SkipBack,
 } from "lucide-react";
 import { formatFileSize } from "@/lib/utils";
+import { toast } from "sonner";
 
 export function VideoCompressor() {
   const [isReady, setIsReady] = useState(false);
@@ -42,6 +42,9 @@ export function VideoCompressor() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
+  // Filmstrip thumbnails
+  const [thumbnails, setThumbnails] = useState<string[]>([]);
+  const FILMSTRIP_COUNT = 12;
   // Trimmer is now always shown when a video is loaded
   const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null);
   const [outputFormat, setOutputFormat] = useState("mp4-h264");
@@ -67,6 +70,8 @@ export function VideoCompressor() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const generatingThumbsRef = useRef(false);
+  const filmstripRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Set ready state immediately since we're using browser APIs
@@ -82,6 +87,65 @@ export function VideoCompressor() {
       }
     };
   }, [videoObjectUrl, compressedVideo]);
+
+  // Generate filmstrip thumbnails when a new video is loaded
+  useEffect(() => {
+    async function generateThumbnails(url: string) {
+      if (generatingThumbsRef.current) return;
+      generatingThumbsRef.current = true;
+      try {
+        const v = document.createElement("video");
+        v.src = url;
+        v.crossOrigin = "anonymous";
+        v.muted = true;
+        await new Promise<void>((resolve, reject) => {
+          const onLoaded = () => resolve();
+          const onErr = () => reject(new Error("thumb-metadata"));
+          v.addEventListener("loadedmetadata", onLoaded, { once: true });
+          v.addEventListener("error", onErr, { once: true });
+          if (v.readyState >= 1) resolve();
+        });
+
+        const duration = v.duration || videoDuration;
+        if (!duration || !isFinite(duration)) {
+          setThumbnails([]);
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        const targetWidth = 96;
+        const aspect = (v.videoHeight || 9) / (v.videoWidth || 16);
+        canvas.width = targetWidth;
+        canvas.height = Math.max(1, Math.round(targetWidth * aspect));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          setThumbnails([]);
+          return;
+        }
+        const thumbs: string[] = [];
+        for (let i = 0; i < FILMSTRIP_COUNT; i++) {
+          const t = ((i + 0.5) / FILMSTRIP_COUNT) * duration;
+          await new Promise<void>((resolve) => {
+            const onSeeked = () => resolve();
+            v.currentTime = Math.min(duration - 0.001, Math.max(0, t));
+            v.addEventListener("seeked", onSeeked, { once: true });
+          });
+          ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+          thumbs.push(canvas.toDataURL("image/webp", 0.6));
+        }
+        setThumbnails(thumbs);
+      } catch (e) {
+        console.warn("thumbnail generation failed", e);
+        setThumbnails([]);
+      } finally {
+        generatingThumbsRef.current = false;
+      }
+    }
+
+    if (videoObjectUrl && videoDuration > 0) {
+      setThumbnails([]);
+      generateThumbnails(videoObjectUrl);
+    }
+  }, [videoObjectUrl, videoDuration]);
 
   // Handle video playback in the trimmer
   useEffect(() => {
@@ -138,6 +202,16 @@ export function VideoCompressor() {
     // (original or compressed) should reset the muted state.
   }, [isCompressing]);
 
+  // Toast: live progress while compressing
+  useEffect(() => {
+    if (!isCompressing) return;
+    toast.loading("Compressing…", {
+      id: "compress",
+      description: `${progress}%`,
+      duration: Infinity,
+    });
+  }, [isCompressing, progress]);
+
   // Handle file selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -146,6 +220,9 @@ export function VideoCompressor() {
       // Check if the file is a video
       if (!file.type.startsWith("video/")) {
         setError("Please select a valid video file.");
+        toast.error("Invalid file", {
+          description: "Please select a valid video file",
+        });
         return;
       }
 
@@ -163,6 +240,7 @@ export function VideoCompressor() {
       setCompressedVideo(null);
       setCompressedSize(null);
       setError(null);
+      setThumbnails([]);
 
       // Reset trimming values - only set start to 0, don't set end yet
       // The end will be set when metadata is loaded
@@ -170,7 +248,50 @@ export function VideoCompressor() {
       setTrimStart(0);
       // Don't set trimEnd to 0 here, as it will be set to video duration in handleLoadedMetadata
       setIsPlaying(false);
+
+      // Toast: uploaded
+      toast.success("Video selected", {
+        description: `${file.name} • ${formatFileSize(file.size)}`,
+      });
     }
+  };
+
+  // Dragging trim handles on filmstrip
+  const handleTrimHandlePointerDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    edge: "start" | "end"
+  ) => {
+    e.preventDefault();
+    const container = filmstripRef.current;
+    if (!container || videoDuration <= 0) return;
+    const rect = container.getBoundingClientRect();
+    const minTrim = 0.1; // 100ms
+
+    const pointerId = e.pointerId;
+    const handleEl = e.currentTarget as HTMLElement | null;
+    handleEl?.setPointerCapture?.(pointerId);
+
+    const onMove = (ev: PointerEvent) => {
+      const pos = (ev.clientX - rect.left) / rect.width;
+      const t = Math.max(0, Math.min(1, pos)) * videoDuration;
+      if (edge === "start") {
+        const ns = Math.min(t, trimEnd - minTrim);
+        setTrimStart(ns);
+        if (currentTime < ns) handleSeek(ns);
+      } else {
+        const ne = Math.max(t, trimStart + minTrim);
+        const clamped = Math.min(videoDuration, ne);
+        setTrimEnd(clamped);
+        if (currentTime > clamped) handleSeek(clamped);
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      handleEl?.releasePointerCapture?.(pointerId);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
   };
 
   // Format time in MM:SS.ms format
@@ -182,31 +303,6 @@ export function VideoCompressor() {
     return `${minutes.toString().padStart(2, "0")}:${seconds
       .toString()
       .padStart(2, "0")}.${milliseconds.toString().padStart(2, "0")}`;
-  };
-
-  // Handle trim range change
-  const handleTrimRangeChange = (values: number[]) => {
-    if (!videoPreviewRef.current || values.length !== 2) return;
-
-    const minTrimDuration = 0.1; // Minimum 100ms trim duration
-    const duration = videoPreviewRef.current.duration;
-
-    let [newStart, newEnd] = values;
-
-    // Ensure valid bounds
-    newStart = Math.max(0, Math.min(newStart, duration - minTrimDuration));
-    newEnd = Math.min(duration, Math.max(newEnd, newStart + minTrimDuration));
-
-    setTrimStart(newStart);
-    setTrimEnd(newEnd);
-
-    // Adjust current time if it's outside new trim bounds
-    const videoElement = videoPreviewRef.current;
-    if (videoElement.currentTime < newStart) {
-      videoElement.currentTime = newStart;
-    } else if (videoElement.currentTime > newEnd) {
-      videoElement.currentTime = newEnd;
-    }
   };
 
   // Handle seeking to a specific time
@@ -225,6 +321,10 @@ export function VideoCompressor() {
 
   // Handle timeline pointer interaction for smooth scrubbing
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Ignore if starting drag on the slider (thumbs or track) so trim dragging isn't hijacked
+    const targetEl = e.target as HTMLElement;
+    if (targetEl.closest('.timeline-slider') || targetEl.closest('[role="slider"]')) return;
+
     const timelineRect = e.currentTarget.getBoundingClientRect();
 
     const updateCurrentTime = (clientX: number) => {
@@ -294,6 +394,13 @@ export function VideoCompressor() {
     setProgress(0);
     // Ensure preview playback is stopped while compressing
     setIsPlaying(false);
+
+    // Toast: start processing
+    toast.loading("Compressing…", {
+      id: "compress",
+      description: "0%",
+      duration: Infinity,
+    });
 
     const video = videoPreviewRef.current;
 
@@ -562,6 +669,21 @@ export function VideoCompressor() {
         setCompressedSize(finalSize);
         setIsCompressing(false);
 
+        // Toast: finished with details and open action
+        const original = originalSize ?? 0;
+        const reduction = original > 0 ? Math.round((1 - finalSize / original) * 100) : null;
+        toast.success("Compression complete", {
+          id: "compress",
+          description:
+            original && reduction !== null
+              ? `${formatFileSize(original)} → ${formatFileSize(finalSize)} • ${reduction}% smaller`
+              : `${formatFileSize(finalSize)}`,
+          action: {
+            label: "Open",
+            onClick: () => window.open(compressedUrl, "_blank"),
+          },
+        });
+
         // Clean up
         audioElement.pause();
         audioElement.src = "";
@@ -623,6 +745,10 @@ export function VideoCompressor() {
       setError(
         "Failed to compress video. Please try again with a different file."
       );
+      toast.error("Compression failed", {
+        id: "compress",
+        description: "Please try again with a different file",
+      });
       console.error(err);
       setIsCompressing(false);
     }
@@ -752,8 +878,8 @@ export function VideoCompressor() {
                   videoObjectUrl &&
                   !compressedVideo &&
                   !isCompressing && (
-                    <div className="space-y-2">
-                      <div className="space-y-4 p-4 border rounded-lg">
+                    <div className="space-y-3">
+                      <div className="space-y-4 p-4 rounded-xl border bg-card/50 backdrop-blur">
                         <div className="aspect-video bg-black rounded-xl overflow-hidden ring-1 ring-border">
                           <video
                             ref={videoPreviewRef}
@@ -765,18 +891,18 @@ export function VideoCompressor() {
                           />
                         </div>
 
-                        <div className="space-y-2">
-                          {/* Current time display */}
-                          <div className="flex justify-between text-sm">
+                        <div className="space-y-3">
+                          {/* Timecodes */}
+                          <div className="flex items-center justify-between text-xs sm:text-sm text-muted-foreground font-mono tabular-nums">
                             <span>Current: {formatTime(currentTime)}</span>
                             <span>Duration: {formatTime(videoDuration)}</span>
                           </div>
 
                           {/* Playback controls */}
-                          <div className="flex justify-center gap-2">
+                          <div className="flex items-center justify-center gap-2">
                             <Button
                               size="icon"
-                              variant="outline"
+                              variant="secondary"
                               onClick={() => handleFrameStep(false)}
                               title="Previous frame"
                             >
@@ -784,7 +910,7 @@ export function VideoCompressor() {
                             </Button>
                             <Button
                               size="icon"
-                              variant="outline"
+                              variant="default"
                               onClick={togglePlayPause}
                             >
                               {isPlaying ? (
@@ -795,7 +921,7 @@ export function VideoCompressor() {
                             </Button>
                             <Button
                               size="icon"
-                              variant="outline"
+                              variant="secondary"
                               onClick={() => handleFrameStep(true)}
                               title="Next frame"
                             >
@@ -803,7 +929,7 @@ export function VideoCompressor() {
                             </Button>
                             <Button
                               size="icon"
-                              variant="outline"
+                              variant="ghost"
                               onClick={resetTrim}
                               title="Reset trim"
                             >
@@ -811,45 +937,89 @@ export function VideoCompressor() {
                             </Button>
                           </div>
 
-                          {/* Combined Timeline */}
+                          {/* Timeline: separate scrubber + filmstrip with handles */}
                           <div className="space-y-2">
-                            {/* Single combined timeline container */}
+                            {/* Scrubber */}
                             <div
-                              className="relative w-full cursor-pointer py-2"
+                              className="relative w-full select-none cursor-pointer py-2"
                               onPointerDown={handleTimelinePointerDown}
                             >
-                              {/* Range slider for trimStart & trimEnd */}
-                              <Slider
-                                value={[trimStart, trimEnd]}
-                                min={0}
-                                max={videoDuration || 100}
-                                step={0.01}
-                                minStepsBetweenThumbs={0.1}
-                                onValueChange={handleTrimRangeChange}
-                                disabled={!videoDuration}
-                                // Thicker track and larger thumbs
-                                className="[&_[role=slider]]:h-4 [&_[role=slider]]:w-4"
-                              />
-
-                              {/* Current-time pointer (absolute overlay) */}
+                              <div className="h-1 w-full rounded-full bg-muted-foreground/20" />
                               {videoDuration > 0 && (
                                 <div
-                                  className="pointer-events-none absolute top-1/2 z-10 h-8 w-1 -translate-x-1/2 -translate-y-1/2 bg-primary"
-                                  style={{
-                                    left: `${(currentTime / videoDuration) * 100}%`,
-                                    // transform: "translateX(-50%) translateY(-50%)", // Use translate classes
-                                  }}
+                                  className="pointer-events-none absolute top-1/2 z-20 h-5 w-px -translate-y-1/2 bg-foreground"
+                                  style={{ left: `${(currentTime / videoDuration) * 100}%` }}
                                 />
                               )}
                             </div>
 
-                            {/* Trim range display */}
-                            <div className="flex justify-between text-xs text-muted-foreground">
-                              <span>Start: {formatTime(trimStart)}</span>
-                              <span>
-                                Duration: {formatTime(trimEnd - trimStart)}
-                              </span>
-                              <span>End: {formatTime(trimEnd)}</span>
+                            {/* Filmstrip with handles */}
+                            <div
+                              ref={filmstripRef}
+                              className="relative w-full h-16 rounded-md overflow-hidden bg-muted/20 ring-1 ring-border"
+                            >
+                              <div className="flex h-full w-full">
+                                {thumbnails.length > 0
+                                  ? thumbnails.map((src, i) => (
+                                      <img
+                                        key={i}
+                                        src={src}
+                                        alt="thumb"
+                                        className="h-full w-[96px] flex-none object-cover select-none"
+                                        draggable={false}
+                                      />
+                                    ))
+                                  : (
+                                      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                                        Generating preview…
+                                      </div>
+                                    )}
+                              </div>
+
+                              {/* Overlays to dim outside selection */}
+                              {videoDuration > 0 && (
+                                <>
+                                  <div
+                                    className="absolute inset-y-0 left-0 bg-background/70"
+                                    style={{ width: `${(trimStart / videoDuration) * 100}%` }}
+                                  />
+                                  <div
+                                    className="absolute inset-y-0 right-0 bg-background/70"
+                                    style={{ width: `${((videoDuration - trimEnd) / videoDuration) * 100}%` }}
+                                  />
+                                  {/* Selection outline */}
+                                  <div
+                                    className="pointer-events-none absolute inset-y-0 border-2 border-foreground/60"
+                                    style={{
+                                      left: `${(trimStart / videoDuration) * 100}%`,
+                                      width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
+                                    }}
+                                  />
+                                  {/* Start handle */}
+                                  <div
+                                    role="button"
+                                    aria-label="Trim start"
+                                    className="absolute inset-y-0 -translate-x-1/2 w-2 bg-foreground/90 cursor-ew-resize"
+                                    style={{ left: `${(trimStart / videoDuration) * 100}%` }}
+                                    onPointerDown={(e) => handleTrimHandlePointerDown(e, "start")}
+                                  />
+                                  {/* End handle */}
+                                  <div
+                                    role="button"
+                                    aria-label="Trim end"
+                                    className="absolute inset-y-0 translate-x-1/2 w-2 bg-foreground/90 cursor-ew-resize"
+                                    style={{ left: `${(trimEnd / videoDuration) * 100}%` }}
+                                    onPointerDown={(e) => handleTrimHandlePointerDown(e, "end")}
+                                  />
+                                </>
+                              )}
+                            </div>
+
+                            {/* Trim chips */}
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground font-mono tabular-nums">
+                              <span className="rounded-md bg-muted px-2 py-1">Start: {formatTime(trimStart)}</span>
+                              <span className="rounded-md bg-muted px-2 py-1">Duration: {formatTime(trimEnd - trimStart)}</span>
+                              <span className="rounded-md bg-muted px-2 py-1">End: {formatTime(trimEnd)}</span>
                             </div>
                           </div>
                         </div>

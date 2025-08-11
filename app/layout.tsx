@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -33,6 +34,7 @@ export default function RootLayout({
             </header>
             {children}
           </div>
+          <Toaster position="top-center" richColors closeButton />
         </ThemeProvider>
         <VersionLabel />
         <script
@@ -66,7 +68,7 @@ export function VersionLabel() {
             >
               Wilsman77
             </a>{" "}
-            updated on 31/03/2025
+            updated on 11/08/2025
           </span>
         </div>
       </div>
