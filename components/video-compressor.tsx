@@ -15,6 +15,13 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+import {
   Download,
   Upload,
   AlertCircle,
@@ -776,10 +783,10 @@ export function VideoCompressor() {
   };
 
   return (
-    <Card className="w-full overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/20">
+    <Card className="w-full overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/30">
       <CardHeader>
         <CardTitle className="bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
-          Video Compression Tool
+          Trim & Compress
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -793,7 +800,7 @@ export function VideoCompressor() {
           )}
           {/* Wrap main content and tabs in a fragment */}
           <div
-            className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl hover:border-primary transition-colors bg-muted/20 ring-1 ring-border"
+            className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl hover:border-primary transition-colors bg-muted/30 ring-1 ring-border"
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -828,48 +835,51 @@ export function VideoCompressor() {
 
             {!originalVideo ? (
               <div className="text-center">
-                <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                <p className="mb-2 text-sm text-muted-foreground">
-                  Click to upload or drag and drop
+                <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-3" />
+                <p className="mb-1 text-sm text-muted-foreground">
+                  Drop a file here or click below
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  MP4, MOV, AVI, WebM (Max 100MB)
+                  MP4, MOV, AVI, WebM • up to 100MB
                 </p>
                 <Button
                   onClick={handleUploadClick}
                   className="mt-4"
                   disabled={!isReady}
+                  aria-label="Select video to upload"
                 >
                   Select Video
                 </Button>
               </div>
             ) : (
               <div className="w-full space-y-4">
-                <p className="text-center font-medium">{originalVideo.name}</p>
-
-                {originalSize && (
-                  <div className="text-center text-sm text-muted-foreground">
-                    Original size: {formatFileSize(originalSize)}
-                  </div>
-                )}
+                <div className="text-center space-y-1">
+                  <p className="font-medium truncate" title={originalVideo.name}>{originalVideo.name}</p>
+                  {originalSize && (
+                    <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="rounded-md bg-muted px-2 py-0.5">Original: {formatFileSize(originalSize)}</span>
+                    </div>
+                  )}
+                </div>
 
                 {/* Output format selection */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Output Format</label>
-                  <select
-                    value={outputFormat}
-                    onChange={(e) => setOutputFormat(e.target.value)}
-                    className="w-full p-2 border rounded-md bg-background text-foreground"
-                  >
-                    {formatOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label} - {option.description}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={outputFormat} onValueChange={setOutputFormat}>
+                    <SelectTrigger aria-label="Select output format">
+                      <SelectValue placeholder="Select format" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {formatOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label} — {option.description}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <div className="text-xs text-muted-foreground">
-                    {formatOptions.find((o) => o.value === outputFormat)?.pros}{" "}
-                    |{formatOptions.find((o) => o.value === outputFormat)?.cons}
+                    {formatOptions.find((o) => o.value === outputFormat)?.pros} |
+                    {formatOptions.find((o) => o.value === outputFormat)?.cons}
                   </div>
                 </div>
 
@@ -905,6 +915,7 @@ export function VideoCompressor() {
                               variant="secondary"
                               onClick={() => handleFrameStep(false)}
                               title="Previous frame"
+                              aria-label="Previous frame"
                             >
                               <SkipBack className="h-4 w-4" />
                             </Button>
@@ -912,6 +923,7 @@ export function VideoCompressor() {
                               size="icon"
                               variant="default"
                               onClick={togglePlayPause}
+                              aria-label={isPlaying ? "Pause" : "Play"}
                             >
                               {isPlaying ? (
                                 <Pause className="h-4 w-4" />
@@ -924,6 +936,7 @@ export function VideoCompressor() {
                               variant="secondary"
                               onClick={() => handleFrameStep(true)}
                               title="Next frame"
+                              aria-label="Next frame"
                             >
                               <SkipForward className="h-4 w-4" />
                             </Button>
@@ -932,6 +945,7 @@ export function VideoCompressor() {
                               variant="ghost"
                               onClick={resetTrim}
                               title="Reset trim"
+                              aria-label="Reset trim"
                             >
                               <RotateCcw className="h-4 w-4" />
                             </Button>
@@ -999,18 +1013,22 @@ export function VideoCompressor() {
                                   <div
                                     role="button"
                                     aria-label="Trim start"
-                                    className="absolute inset-y-0 -translate-x-1/2 w-2 bg-foreground/90 cursor-ew-resize"
+                                    className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
                                     style={{ left: `${(trimStart / videoDuration) * 100}%` }}
                                     onPointerDown={(e) => handleTrimHandlePointerDown(e, "start")}
-                                  />
+                                  >
+                                    <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
+                                  </div>
                                   {/* End handle */}
                                   <div
                                     role="button"
                                     aria-label="Trim end"
-                                    className="absolute inset-y-0 translate-x-1/2 w-2 bg-foreground/90 cursor-ew-resize"
+                                    className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
                                     style={{ left: `${(trimEnd / videoDuration) * 100}%` }}
                                     onPointerDown={(e) => handleTrimHandlePointerDown(e, "end")}
-                                  />
+                                  >
+                                    <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
+                                  </div>
                                 </>
                               )}
                             </div>
@@ -1032,7 +1050,9 @@ export function VideoCompressor() {
                     onClick={compressVideo}
                     className="w-full"
                     disabled={!isReady || !originalVideo}
+                    aria-label="Compress video"
                   >
+                    <Scissors className="mr-2 h-4 w-4" />
                     Compress Video
                   </Button>
                 )}
@@ -1048,19 +1068,15 @@ export function VideoCompressor() {
 
                 {compressedVideo && compressedSize && (
                   <div className="space-y-4">
-                    <div className="flex justify-between text-sm">
-                      <span>Original: {formatFileSize(originalSize!)}</span>
-                      <span>Compressed: {formatFileSize(compressedSize)}</span>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="rounded-md bg-muted px-2 py-0.5">Original: {formatFileSize(originalSize!)}</span>
+                      <span className="rounded-md bg-muted px-2 py-0.5">Compressed: {formatFileSize(compressedSize)}</span>
                     </div>
 
                     <div className="text-center text-sm text-muted-foreground">
                       {originalSize && compressedSize && (
-                        <span>
-                          Reduced by{" "}
-                          {Math.round(
-                            (1 - compressedSize / originalSize) * 100
-                          )}
-                          %
+                        <span className="rounded-md bg-emerald-500/10 text-emerald-500 px-2 py-0.5">
+                          Reduced by {Math.round((1 - compressedSize / originalSize) * 100)}%
                         </span>
                       )}
                     </div>
@@ -1069,6 +1085,7 @@ export function VideoCompressor() {
                       onClick={downloadCompressedVideo}
                       className="w-full"
                       variant="secondary"
+                      aria-label="Download compressed video"
                     >
                       <Download className="mr-2 h-4 w-4" />
                       Download Compressed Video
@@ -1078,8 +1095,9 @@ export function VideoCompressor() {
 
                 <Button
                   onClick={handleUploadClick}
-                  variant="outline"
+                  variant="ghost"
                   className="w-full"
+                  aria-label="Select a different video"
                 >
                   Select Different Video
                 </Button>
