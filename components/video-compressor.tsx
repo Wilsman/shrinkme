@@ -34,6 +34,22 @@ import {
 } from "lucide-react";
 import { formatFileSize } from "@/lib/utils";
 import { toast } from "sonner";
+// Mediabunny for faster conversion
+import {
+  Input as MBInput,
+  Output as MBOutput,
+  Conversion as MBConversion,
+  ALL_FORMATS as MB_ALL_FORMATS,
+  BlobSource as MBBlobSource,
+  BufferTarget as MBBufferTarget,
+  Mp4OutputFormat as MBMp4OutputFormat,
+  WebMOutputFormat as MBWebMOutputFormat,
+  QUALITY_VERY_LOW as MB_QUALITY_VERY_LOW,
+  QUALITY_LOW as MB_QUALITY_LOW,
+  QUALITY_MEDIUM as MB_QUALITY_MEDIUM,
+  QUALITY_HIGH as MB_QUALITY_HIGH,
+  QUALITY_VERY_HIGH as MB_QUALITY_VERY_HIGH,
+} from "mediabunny";
 
 export function VideoCompressor() {
   const [isReady, setIsReady] = useState(false);
@@ -42,6 +58,7 @@ export function VideoCompressor() {
   const [error, setError] = useState<string | null>(null);
   const [originalVideo, setOriginalVideo] = useState<File | null>(null);
   const [compressedVideo, setCompressedVideo] = useState<string | null>(null);
+  const [recordedMimeType, setRecordedMimeType] = useState<string | null>(null);
   const [originalSize, setOriginalSize] = useState<number | null>(null);
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const [videoDuration, setVideoDuration] = useState(0);
@@ -55,6 +72,12 @@ export function VideoCompressor() {
   // Trimmer is now always shown when a video is loaded
   const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null);
   const [outputFormat, setOutputFormat] = useState("mp4-h264");
+  const [encodeEngine, setEncodeEngine] = useState<"browser" | "mediabunny">(
+    "mediabunny"
+  );
+  const [qualityPreset, setQualityPreset] = useState<
+    "auto" | "very_low" | "low" | "medium" | "high" | "very_high"
+  >("auto");
 
   // Format options with pros/cons
   const formatOptions = [
@@ -73,6 +96,28 @@ export function VideoCompressor() {
       cons: "Slower encoding, limited support",
     },
   ];
+
+  const engineOptions = [
+    {
+      value: "browser",
+      label: "Browser (MediaRecorder)",
+      description: "Portable, respects trim; slower",
+    },
+    {
+      value: "mediabunny",
+      label: "Mediabunny",
+      description: "Faster, higher quality conversion",
+    },
+  ] as const;
+
+  const qualityOptions = [
+    { value: "auto", label: "Auto (target ~10MB)" },
+    { value: "very_low", label: "Very Low" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "very_high", label: "Very High" },
+  ] as const;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
@@ -394,6 +439,12 @@ export function VideoCompressor() {
       return;
     }
 
+    // If Mediabunny is selected, delegate to it
+    if (encodeEngine === "mediabunny") {
+      await compressWithMediabunny();
+      return;
+    }
+
     setIsCompressing(true);
     setError(null);
     setCompressedVideo(null);
@@ -598,45 +649,47 @@ export function VideoCompressor() {
 
       console.log(`Using framerate: ${fps}fps`);
 
-      // Set up MediaRecorder with calculated bitrate
+      // Set up output stream from canvas (video) and add source audio via captureStream
       const stream = canvas.captureStream(fps);
 
-      // IMPROVED AUDIO HANDLING
-      // Create a new audio element to extract audio
-      const audioElement = document.createElement("audio");
-      audioElement.src = videoObjectUrl!;
-      // Keep audio track in the recording but do not play it to the user
-      audioElement.muted = true;
-
-      // Create audio context and connect it to the stream
-      const audioCtx = new AudioContext();
-      const audioDestination = audioCtx.createMediaStreamDestination();
-
-      // Connect audio element to the audio context
-      const audioSource = audioCtx.createMediaElementSource(audioElement);
-      audioSource.connect(audioDestination);
-
-      // Intentionally DO NOT connect to audioCtx.destination to avoid audible playback during compression
-
-      // Add all audio tracks to the stream
-      audioDestination.stream.getAudioTracks().forEach((track) => {
+      // Prefer grabbing the original video's audio track via captureStream for reliability
+      const sourceStream = video.captureStream();
+      sourceStream.getAudioTracks().forEach((track) => {
         stream.addTrack(track);
       });
 
       // Audio bitrate based on video length (longer videos get lower audio bitrate)
       const audioBitsPerSecond = finalEffectiveDuration > 60 ? 96000 : 128000;
 
-      // Configure MediaRecorder with calculated quality
-      const options = {
-        mimeType:
-          outputFormat === "mp4-h264"
-            ? "video/mp4;codecs=avc1"
-            : "video/webm;codecs=vp9",
+      // Choose a supported recorder MIME type. Fallback to WebM+Opus if MP4 is unsupported.
+      const mimeCandidates =
+        outputFormat === "mp4-h264"
+          ? [
+              "video/mp4;codecs=avc1,mp4a.40.2",
+              "video/mp4;codecs=avc1",
+              "video/mp4",
+              // fallbacks to webm if mp4 is not supported
+              "video/webm;codecs=vp9,opus",
+              "video/webm;codecs=vp8,opus",
+              "video/webm",
+            ]
+          : [
+              "video/webm;codecs=vp9,opus",
+              "video/webm;codecs=vp8,opus",
+              "video/webm",
+            ];
+
+      const supportedMime = mimeCandidates.find((t) =>
+        (window as any).MediaRecorder?.isTypeSupported?.(t)
+      );
+
+      const recorderOptions: MediaRecorderOptions = {
+        mimeType: supportedMime,
         videoBitsPerSecond: videoBitsPerSecond,
         audioBitsPerSecond: audioBitsPerSecond,
       };
 
-      const mediaRecorder = new MediaRecorder(stream, options);
+      const mediaRecorder = new MediaRecorder(stream, recorderOptions);
       const chunks: Blob[] = [];
 
       mediaRecorder.ondataavailable = (e) => {
@@ -646,13 +699,13 @@ export function VideoCompressor() {
       };
 
       mediaRecorder.onstop = () => {
-        // Determine the correct MIME type for the final blob
-        const finalMimeType =
-          outputFormat === "mp4-h264" ? "video/mp4" : "video/webm";
+        // Use the recorder's actual MIME type (ensures audio codec/container alignment)
+        const actualType = mediaRecorder.mimeType || (chunks[0]?.type || "video/webm");
 
-        // Create compressed video blob with the correct type
-        const blob = new Blob(chunks, { type: finalMimeType });
+        // Create compressed video blob with the actual type
+        const blob = new Blob(chunks, { type: actualType });
         const compressedUrl = URL.createObjectURL(blob);
+        setRecordedMimeType(actualType);
 
         // Check if we're under 10MB
         const finalSize = blob.size;
@@ -692,16 +745,10 @@ export function VideoCompressor() {
         });
 
         // Clean up
-        audioElement.pause();
-        audioElement.src = "";
-        audioElement.remove();
         video.pause();
         // Restore previous mute/volume state
         video.muted = previousVideoMuted;
         video.volume = previousVideoVolume;
-
-        // Close audio context
-        audioCtx.close();
       };
 
       // Start recording
@@ -736,15 +783,9 @@ export function VideoCompressor() {
         }
       };
 
-      // Start playback of both video and audio from trim start
+      // Start playback from trim start
       video.currentTime = trimStart;
-      audioElement.currentTime = trimStart;
-
-      // Play both elements
-      const playPromises = [video.play(), audioElement.play()];
-
-      // Wait for both to start playing
-      await Promise.all(playPromises);
+      await video.play();
 
       // Start drawing frames
       drawFrame();
@@ -772,14 +813,168 @@ export function VideoCompressor() {
 
     const a = document.createElement("a");
     a.href = compressedVideo;
+    const ext = recordedMimeType?.includes("mp4")
+      ? "mp4"
+      : "webm";
     a.download = originalVideo
-      ? `compressed-${originalVideo.name.replace(/\.[^/.]+$/, "")}.${
-          outputFormat.startsWith("mp4") ? "mp4" : "webm"
-        }`
-      : `compressed-video.${outputFormat.startsWith("mp4") ? "mp4" : "webm"}`;
+      ? `compressed-${originalVideo.name.replace(/\.[^/.]+$/, "")}.${ext}`
+      : `compressed-video.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  // Compress using Mediabunny Conversion (fast path)
+  const compressWithMediabunny = async () => {
+    if (!originalVideo) return;
+
+    setIsCompressing(true);
+    setError(null);
+    setCompressedVideo(null);
+    setCompressedSize(null);
+    setProgress(0);
+
+    toast.loading("Converting…", {
+      id: "compress",
+      description: "Starting",
+      duration: Infinity,
+    });
+
+    try {
+      // Prepare input and output
+      const input = new MBInput({
+        source: new MBBlobSource(originalVideo),
+        formats: MB_ALL_FORMATS,
+      });
+
+      // Choose output container based on selection
+      const format =
+        outputFormat === "mp4-h264"
+          ? new MBMp4OutputFormat()
+          : new MBWebMOutputFormat();
+
+      const target = new MBBufferTarget();
+      const output = new MBOutput({ format, target });
+
+      // Compute quality/bitrates and resize similar to Browser path
+      const effectiveDuration = Math.max(0.01, (trimEnd || videoDuration) - (trimStart || 0));
+      const TARGET_SIZE_BITS = 9.3 * 8 * 1024 * 1024;
+      const videoTargetBits = TARGET_SIZE_BITS * 0.65;
+      const targetVideoBitrate = Math.floor(videoTargetBits / effectiveDuration);
+      const computedVideoBps = Math.max(300000, Math.min(targetVideoBitrate, 3500000));
+      const audioBitsPerSecond = effectiveDuration > 60 ? 96000 : 128000;
+
+      // Map quality preset
+      const qualityMap = {
+        very_low: MB_QUALITY_VERY_LOW,
+        low: MB_QUALITY_LOW,
+        medium: MB_QUALITY_MEDIUM,
+        high: MB_QUALITY_HIGH,
+        very_high: MB_QUALITY_VERY_HIGH,
+      } as const;
+
+      // Decide bitrate param (number or Quality)
+      const videoBitrateParam =
+        qualityPreset === "auto" ? computedVideoBps : qualityMap[qualityPreset];
+
+      // Size/resolution scaling
+      let targetWidth = 0;
+      let targetHeight = 0;
+      // Probe dimensions via a video element (we already have preview video)
+      const v = document.createElement("video");
+      v.src = videoObjectUrl || URL.createObjectURL(originalVideo);
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        v.addEventListener("loadedmetadata", done, { once: true });
+        if (v.readyState >= 1) resolve();
+      });
+      // Use same scaling heuristic
+      let scaleFactor = 1;
+      if (typeof videoBitrateParam === "number") {
+        if (videoBitrateParam < 1000000) scaleFactor = 0.5;
+        else if (videoBitrateParam < 2000000) scaleFactor = 0.65;
+        else if (videoBitrateParam < 3000000) scaleFactor = 0.75;
+        else scaleFactor = 0.85;
+      } else {
+        // For quality presets, pick a modest upscale limit
+        scaleFactor = 0.85;
+      }
+      targetWidth = Math.max(2, Math.floor(v.videoWidth * scaleFactor));
+      targetHeight = Math.max(2, Math.floor(v.videoHeight * scaleFactor));
+      targetWidth -= targetWidth % 2;
+      targetHeight -= targetHeight % 2;
+      const MAX_DIMENSION = 1280;
+      if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
+        if (targetWidth > targetHeight) {
+          const ratio = MAX_DIMENSION / targetWidth;
+          targetWidth = MAX_DIMENSION;
+          targetHeight = Math.floor(targetHeight * ratio);
+        } else {
+          const ratio = MAX_DIMENSION / targetHeight;
+          targetHeight = MAX_DIMENSION;
+          targetWidth = Math.floor(targetWidth * ratio);
+        }
+        targetWidth -= targetWidth % 2;
+        targetHeight -= targetHeight % 2;
+      }
+
+      // Initialize conversion with trim and encoding options
+      const conv = await MBConversion.init({
+        input,
+        output,
+        trim:
+          videoDuration > 0
+            ? { start: Math.max(0, trimStart), end: Math.min(videoDuration, trimEnd || videoDuration) }
+            : undefined,
+        video: {
+          // container -> codec mapping; let library choose best if undefined
+          codec: outputFormat === "mp4-h264" ? ("avc" as any) : ("vp9" as any),
+          bitrate: videoBitrateParam as any,
+          width: targetWidth || undefined,
+          // Don't provide height when width is set to avoid requiring `fit`
+          forceTranscode: true,
+        },
+        audio: {
+          codec: outputFormat === "mp4-h264" ? ("aac" as any) : ("opus" as any),
+          bitrate: audioBitsPerSecond as any,
+          forceTranscode: true,
+        },
+      });
+
+      // Progress updates
+      conv.onProgress = (p: number) => {
+        const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+        setProgress(pct);
+        toast.loading("Converting…", { id: "compress", description: `${pct}%`, duration: Infinity });
+      };
+
+      // Execute conversion (no progress callback available in basic API)
+      await conv.execute();
+
+      const buffer = target.buffer as ArrayBuffer;
+      const mime = outputFormat === "mp4-h264" ? "video/mp4" : "video/webm";
+      const blob = new Blob([buffer], { type: mime });
+      const url = URL.createObjectURL(blob);
+
+      setCompressedVideo(url);
+      setCompressedSize(blob.size);
+      setRecordedMimeType(mime);
+      setProgress(100);
+
+      toast.success("Conversion complete", {
+        id: "compress",
+        description: formatFileSize(blob.size),
+      });
+    } catch (e: any) {
+      console.error("Mediabunny conversion failed", e);
+      setError(e?.message || "Mediabunny conversion failed");
+      toast.error("Conversion error", {
+        id: "compress",
+        description: e?.message || String(e),
+      });
+    } finally {
+      setIsCompressing(false);
+    }
   };
 
   return (
@@ -862,9 +1057,46 @@ export function VideoCompressor() {
                   )}
                 </div>
 
-                {/* Output format selection */}
+                {/* Encoder and quality/format selection */}
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Output Format</label>
+                  <label className="text-sm font-medium">Encoder</label>
+                  <Select value={encodeEngine} onValueChange={(v) => setEncodeEngine(v as any)}>
+                    <SelectTrigger aria-label="Select encoder engine">
+                      <SelectValue placeholder="Select encoder" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {engineOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label} — {option.description}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {encodeEngine === "mediabunny" && (
+                    <div className="text-xs text-muted-foreground">
+                      Faster conversion with quality presets. Trim supported.
+                    </div>
+                  )}
+
+                  {encodeEngine === "mediabunny" && (
+                    <>
+                      <label className="text-sm font-medium mt-4 block">Quality</label>
+                      <Select value={qualityPreset} onValueChange={(v) => setQualityPreset(v as any)}>
+                        <SelectTrigger aria-label="Select quality preset">
+                          <SelectValue placeholder="Select quality" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {qualityOptions.map((q) => (
+                            <SelectItem key={q.value} value={q.value}>
+                              {q.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </>
+                  )}
+
+                  <label className="text-sm font-medium mt-4 block">Output Format</label>
                   <Select value={outputFormat} onValueChange={setOutputFormat}>
                     <SelectTrigger aria-label="Select output format">
                       <SelectValue placeholder="Select format" />
