@@ -78,6 +78,7 @@ export function VideoCompressor() {
   const [qualityPreset, setQualityPreset] = useState<
     "auto" | "very_low" | "low" | "medium" | "high" | "very_high"
   >("auto");
+  const [targetSizeMB, setTargetSizeMB] = useState<number>(10);
 
   // Format options with pros/cons
   const formatOptions = [
@@ -111,12 +112,21 @@ export function VideoCompressor() {
   ] as const;
 
   const qualityOptions = [
-    { value: "auto", label: "Auto (target ~10MB)" },
+    { value: "auto", label: "Auto (target size)" },
     { value: "very_low", label: "Very Low" },
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
     { value: "high", label: "High" },
     { value: "very_high", label: "Very High" },
+  ] as const;
+
+  const targetSizeOptions = [
+    { value: 8, label: "8 MB" },
+    { value: 10, label: "10 MB (Default)" },
+    { value: 25, label: "25 MB" },
+    { value: 50, label: "50 MB" },
+    { value: 100, label: "100 MB" },
+    { value: 500, label: "500 MB" },
   ] as const;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -546,10 +556,10 @@ export function VideoCompressor() {
         `Using final trim values - Start: ${actualStartTime}s, End: ${actualEndTime}s, Duration: ${finalEffectiveDuration}s`
       );
 
-      // Target size: 9.3MB in bits (more conservative to ensure we stay below 10MB)
-      const TARGET_SIZE_BITS = 9.3 * 8 * 1024 * 1024;
+      // Target size: Use 93% of selected target to ensure we stay below the limit
+      const TARGET_SIZE_BITS = (targetSizeMB * 0.93) * 8 * 1024 * 1024;
 
-      // Calculate target bitrate based on duration to achieve ~10MB file
+      // Calculate target bitrate based on duration to achieve target file size
       // Reserve ~35% for audio and container overhead
       const videoTargetBits = TARGET_SIZE_BITS * 0.65;
       const targetVideoBitrate = Math.floor(
@@ -650,11 +660,11 @@ export function VideoCompressor() {
       console.log(`Using framerate: ${fps}fps`);
 
       // Set up output stream from canvas (video) and add source audio via captureStream
-      const stream = canvas.captureStream(fps);
+      const stream = (canvas as any).captureStream(fps);
 
       // Prefer grabbing the original video's audio track via captureStream for reliability
-      const sourceStream = video.captureStream();
-      sourceStream.getAudioTracks().forEach((track) => {
+      const sourceStream = (video as any).captureStream();
+      sourceStream.getAudioTracks().forEach((track: MediaStreamTrack) => {
         stream.addTrack(track);
       });
 
@@ -707,21 +717,21 @@ export function VideoCompressor() {
         const compressedUrl = URL.createObjectURL(blob);
         setRecordedMimeType(actualType);
 
-        // Check if we're under 10MB
+        // Check if we're under target size
         const finalSize = blob.size;
-        const tenMB = 10 * 1024 * 1024;
+        const targetBytes = targetSizeMB * 1024 * 1024;
 
-        if (finalSize > tenMB) {
+        if (finalSize > targetBytes) {
           console.warn(
-            `Compressed size ${finalSize} is still over 10MB, would need further compression`
+            `Compressed size ${finalSize} is still over ${targetSizeMB}MB, would need further compression`
           );
           // We'll still use this result as it's the best we can do with one pass
         } else {
           console.log(
             `Successfully compressed to ${finalSize / (1024 * 1024)}MB (${(
-              (finalSize / tenMB) *
+              (finalSize / targetBytes) *
               100
-            ).toFixed(1)}% of 10MB limit)`
+            ).toFixed(1)}% of ${targetSizeMB}MB limit)`
           );
         }
 
@@ -824,6 +834,38 @@ export function VideoCompressor() {
     document.body.removeChild(a);
   };
 
+  // Reset everything to start over with a new video
+  const resetCompressor = () => {
+    // Revoke object URLs to free memory
+    if (videoObjectUrl) {
+      URL.revokeObjectURL(videoObjectUrl);
+    }
+    if (compressedVideo) {
+      URL.revokeObjectURL(compressedVideo);
+    }
+
+    // Reset all state
+    setOriginalVideo(null);
+    setVideoObjectUrl(null);
+    setCompressedVideo(null);
+    setCompressedSize(null);
+    setOriginalSize(null);
+    setError(null);
+    setProgress(0);
+    setIsCompressing(false);
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setTrimStart(0);
+    setTrimEnd(0);
+    setVideoDuration(0);
+    setThumbnails([]);
+    setRecordedMimeType(null);
+
+    toast.success("Ready for new video", {
+      description: "Select a video to compress",
+    });
+  };
+
   // Compress using Mediabunny Conversion (fast path)
   const compressWithMediabunny = async () => {
     if (!originalVideo) return;
@@ -858,7 +900,7 @@ export function VideoCompressor() {
 
       // Compute quality/bitrates and resize similar to Browser path
       const effectiveDuration = Math.max(0.01, (trimEnd || videoDuration) - (trimStart || 0));
-      const TARGET_SIZE_BITS = 9.3 * 8 * 1024 * 1024;
+      const TARGET_SIZE_BITS = (targetSizeMB * 0.93) * 8 * 1024 * 1024;
       const videoTargetBits = TARGET_SIZE_BITS * 0.65;
       const targetVideoBitrate = Math.floor(videoTargetBits / effectiveDuration);
       const computedVideoBps = Math.max(300000, Math.min(targetVideoBitrate, 3500000));
@@ -978,24 +1020,23 @@ export function VideoCompressor() {
   };
 
   return (
-    <Card className="w-full overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/30">
-      <CardHeader>
-        <CardTitle className="bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
-          Trim & Compress
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {/* Wrap all CardContent children in a single div */}
-        <div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {/* Wrap main content and tabs in a fragment */}
+    <>
+      {/* Title Badge - Only show when video is loaded */}
+      {originalVideo && (
+        <div className="absolute top-4 left-4 z-10">
+          <div className="bg-background/80 backdrop-blur-sm border border-border rounded-lg px-3 py-1.5 shadow-lg">
+            <h1 className="text-sm font-bold bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
+              Video Compressor
+            </h1>
+          </div>
+        </div>
+      )}
+
+      {!originalVideo ? (
+        // Initial Clean View - Just the drop area
+        <div className="flex-1 flex items-center justify-center">
           <div
-            className="flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl hover:border-primary transition-colors bg-muted/30 ring-1 ring-border"
+            className="w-full max-w-2xl p-16 border-2 border-dashed rounded-2xl hover:border-primary transition-all duration-300 bg-muted/30 ring-1 ring-border hover:ring-primary/50 cursor-pointer"
             onDragOver={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -1028,25 +1069,47 @@ export function VideoCompressor() {
               className="hidden"
             />
 
-            {!originalVideo ? (
-              <div className="text-center">
-                <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-3" />
-                <p className="mb-1 text-sm text-muted-foreground">
-                  Drop a file here or click below
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  MP4, MOV, AVI, WebM • up to 100MB
-                </p>
-                <Button
-                  onClick={handleUploadClick}
-                  className="mt-4"
-                  disabled={!isReady}
-                  aria-label="Select video to upload"
-                >
-                  Select Video
-                </Button>
-              </div>
-            ) : (
+            <div className="text-center">
+              <Upload className="mx-auto h-16 w-16 text-muted-foreground mb-4 opacity-50" />
+              <p className="mb-2 text-lg font-medium text-foreground">
+                Drop a video here
+              </p>
+              <p className="text-sm text-muted-foreground mb-6">
+                or click below to select
+              </p>
+              <Button
+                onClick={handleUploadClick}
+                className="mt-2"
+                size="lg"
+                disabled={!isReady}
+                aria-label="Select video to upload"
+              >
+                <Upload className="mr-2 h-5 w-5" />
+                Select Video
+              </Button>
+              <p className="text-xs text-muted-foreground mt-4">
+                Supports MP4, MOV, AVI, WebM
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        // Two-column layout when video is loaded
+        <div className="flex-1 flex gap-4 overflow-hidden">
+          {/* Left Column - Controls */}
+          <Card className="w-[420px] flex-shrink-0 overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/30">
+            <CardHeader className="pt-10 pb-3">
+              <CardTitle className="text-lg bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
+                Controls
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-y-auto max-h-[calc(100vh-16rem)]">
+              {error && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
               <div className="w-full space-y-4">
                 <div className="text-center space-y-1">
                   <p className="font-medium truncate" title={originalVideo.name}>{originalVideo.name}</p>
@@ -1096,6 +1159,23 @@ export function VideoCompressor() {
                     </>
                   )}
 
+                  <label className="text-sm font-medium mt-4 block">Target Size</label>
+                  <Select value={targetSizeMB.toString()} onValueChange={(v) => setTargetSizeMB(Number(v))}>
+                    <SelectTrigger aria-label="Select target size">
+                      <SelectValue placeholder="Select target size" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {targetSizeOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value.toString()}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-muted-foreground">
+                    Output will be compressed to stay under {targetSizeMB} MB (approximately {(targetSizeMB * 0.93).toFixed(1)} MB)
+                  </div>
+
                   <label className="text-sm font-medium mt-4 block">Output Format</label>
                   <Select value={outputFormat} onValueChange={setOutputFormat}>
                     <SelectTrigger aria-label="Select output format">
@@ -1114,168 +1194,6 @@ export function VideoCompressor() {
                     {formatOptions.find((o) => o.value === outputFormat)?.cons}
                   </div>
                 </div>
-
-                {/* Video Trimmer - Always visible when video is loaded */}
-                {originalVideo &&
-                  videoObjectUrl &&
-                  !compressedVideo &&
-                  !isCompressing && (
-                    <div className="space-y-3">
-                      <div className="space-y-4 p-4 rounded-xl border bg-card/50 backdrop-blur">
-                        <div className="aspect-video bg-black rounded-xl overflow-hidden ring-1 ring-border">
-                          <video
-                            ref={videoPreviewRef}
-                            src={videoObjectUrl}
-                            className="w-full h-full"
-                            playsInline
-                            onClick={togglePlayPause}
-                            onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                          />
-                        </div>
-
-                        <div className="space-y-3">
-                          {/* Timecodes */}
-                          <div className="flex items-center justify-between text-xs sm:text-sm text-muted-foreground font-mono tabular-nums">
-                            <span>Current: {formatTime(currentTime)}</span>
-                            <span>Duration: {formatTime(videoDuration)}</span>
-                          </div>
-
-                          {/* Playback controls */}
-                          <div className="flex items-center justify-center gap-2">
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              onClick={() => handleFrameStep(false)}
-                              title="Previous frame"
-                              aria-label="Previous frame"
-                            >
-                              <SkipBack className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="default"
-                              onClick={togglePlayPause}
-                              aria-label={isPlaying ? "Pause" : "Play"}
-                            >
-                              {isPlaying ? (
-                                <Pause className="h-4 w-4" />
-                              ) : (
-                                <Play className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="secondary"
-                              onClick={() => handleFrameStep(true)}
-                              title="Next frame"
-                              aria-label="Next frame"
-                            >
-                              <SkipForward className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              onClick={resetTrim}
-                              title="Reset trim"
-                              aria-label="Reset trim"
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                            </Button>
-                          </div>
-
-                          {/* Timeline: separate scrubber + filmstrip with handles */}
-                          <div className="space-y-2">
-                            {/* Scrubber */}
-                            <div
-                              className="relative w-full select-none cursor-pointer py-2"
-                              onPointerDown={handleTimelinePointerDown}
-                            >
-                              <div className="h-1 w-full rounded-full bg-muted-foreground/20" />
-                              {videoDuration > 0 && (
-                                <div
-                                  className="pointer-events-none absolute top-1/2 z-20 h-5 w-px -translate-y-1/2 bg-foreground"
-                                  style={{ left: `${(currentTime / videoDuration) * 100}%` }}
-                                />
-                              )}
-                            </div>
-
-                            {/* Filmstrip with handles */}
-                            <div
-                              ref={filmstripRef}
-                              className="relative w-full h-16 rounded-md overflow-hidden bg-muted/20 ring-1 ring-border"
-                            >
-                              <div className="flex h-full w-full">
-                                {thumbnails.length > 0
-                                  ? thumbnails.map((src, i) => (
-                                      <img
-                                        key={i}
-                                        src={src}
-                                        alt="thumb"
-                                        className="h-full w-[96px] flex-none object-cover select-none"
-                                        draggable={false}
-                                      />
-                                    ))
-                                  : (
-                                      <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                                        Generating preview…
-                                      </div>
-                                    )}
-                              </div>
-
-                              {/* Overlays to dim outside selection */}
-                              {videoDuration > 0 && (
-                                <>
-                                  <div
-                                    className="absolute inset-y-0 left-0 bg-background/70"
-                                    style={{ width: `${(trimStart / videoDuration) * 100}%` }}
-                                  />
-                                  <div
-                                    className="absolute inset-y-0 right-0 bg-background/70"
-                                    style={{ width: `${((videoDuration - trimEnd) / videoDuration) * 100}%` }}
-                                  />
-                                  {/* Selection outline */}
-                                  <div
-                                    className="pointer-events-none absolute inset-y-0 border-2 border-foreground/60"
-                                    style={{
-                                      left: `${(trimStart / videoDuration) * 100}%`,
-                                      width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
-                                    }}
-                                  />
-                                  {/* Start handle */}
-                                  <div
-                                    role="button"
-                                    aria-label="Trim start"
-                                    className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
-                                    style={{ left: `${(trimStart / videoDuration) * 100}%` }}
-                                    onPointerDown={(e) => handleTrimHandlePointerDown(e, "start")}
-                                  >
-                                    <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
-                                  </div>
-                                  {/* End handle */}
-                                  <div
-                                    role="button"
-                                    aria-label="Trim end"
-                                    className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
-                                    style={{ left: `${(trimEnd / videoDuration) * 100}%` }}
-                                    onPointerDown={(e) => handleTrimHandlePointerDown(e, "end")}
-                                  >
-                                    <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
-                                  </div>
-                                </>
-                              )}
-                            </div>
-
-                            {/* Trim chips */}
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground font-mono tabular-nums">
-                              <span className="rounded-md bg-muted px-2 py-1">Start: {formatTime(trimStart)}</span>
-                              <span className="rounded-md bg-muted px-2 py-1">Duration: {formatTime(trimEnd - trimStart)}</span>
-                              <span className="rounded-md bg-muted px-2 py-1">End: {formatTime(trimEnd)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                 {!compressedVideo && !isCompressing && (
                   <Button
@@ -1322,48 +1240,230 @@ export function VideoCompressor() {
                       <Download className="mr-2 h-4 w-4" />
                       Download Compressed Video
                     </Button>
+
+                    <Button
+                      onClick={resetCompressor}
+                      variant="outline"
+                      className="w-full"
+                      aria-label="Compress another video"
+                    >
+                      <Upload className="mr-2 h-4 w-4" />
+                      Compress Another
+                    </Button>
                   </div>
                 )}
 
-                <Button
-                  onClick={handleUploadClick}
-                  variant="ghost"
-                  className="w-full"
-                  aria-label="Select a different video"
-                >
-                  Select Different Video
-                </Button>
+                {!compressedVideo && (
+                  <Button
+                    onClick={handleUploadClick}
+                    variant="ghost"
+                    className="w-full"
+                    aria-label="Select a different video"
+                  >
+                    Select Different Video
+                  </Button>
+                )}
               </div>
-            )}
-          </div>{" "}
-          {/* End of main controls div */}
-          {originalVideo && compressedVideo && (
-            <Tabs defaultValue="original" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="original">Original</TabsTrigger>
-                <TabsTrigger value="compressed">Compressed</TabsTrigger>
-              </TabsList>
-              <TabsContent value="original" className="mt-4">
-                <video
-                  src={videoObjectUrl!}
-                  controls
-                  className="w-full rounded-lg"
-                  playsInline
-                />
-              </TabsContent>
-              <TabsContent value="compressed" className="mt-4">
-                <video
-                  src={compressedVideo}
-                  controls
-                  className="w-full rounded-lg"
-                  playsInline
-                />
-              </TabsContent>
-            </Tabs>
+            </CardContent>
+          </Card>
+
+          {/* Right Column - Video Preview & Trimmer */}
+          <Card className="flex-1 overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
+                {compressedVideo ? "Preview" : "Video Preview & Trim"}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[calc(100vh-18rem)] flex flex-col">
+              {!originalVideo ? (
+                <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <Upload className="mx-auto h-16 w-16 mb-4 opacity-50" />
+                    <p>Upload a video to get started</p>
+                  </div>
+                </div>
+              ) : compressedVideo ? (
+                <Tabs defaultValue="compressed" className="flex-1 flex flex-col">
+                  <TabsList className="grid w-full grid-cols-2 mb-4">
+                    <TabsTrigger value="original">Original</TabsTrigger>
+                    <TabsTrigger value="compressed">Compressed</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="original" className="flex-1 mt-0">
+                    <video
+                      src={videoObjectUrl!}
+                      controls
+                      className="w-full h-full rounded-lg object-contain bg-black"
+                      playsInline
+                    />
+                  </TabsContent>
+                  <TabsContent value="compressed" className="flex-1 mt-0">
+                    <video
+                      src={compressedVideo}
+                      controls
+                      className="w-full h-full rounded-lg object-contain bg-black"
+                      playsInline
+                    />
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <div className="flex-1 flex flex-col space-y-3">
+                  <div className="flex-1 bg-black rounded-xl overflow-hidden ring-1 ring-border">
+                    <video
+                      ref={videoPreviewRef}
+                      src={videoObjectUrl!}
+                      className="w-full h-full object-contain"
+                      playsInline
+                      onClick={togglePlayPause}
+                      onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    {/* Timecodes */}
+                    <div className="flex items-center justify-between text-xs sm:text-sm text-muted-foreground font-mono tabular-nums">
+                      <span>Current: {formatTime(currentTime)}</span>
+                      <span>Duration: {formatTime(videoDuration)}</span>
+                    </div>
+
+                    {/* Playback controls */}
+                    <div className="flex items-center justify-center gap-2">
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        onClick={() => handleFrameStep(false)}
+                        title="Previous frame"
+                        aria-label="Previous frame"
+                      >
+                        <SkipBack className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="default"
+                        onClick={togglePlayPause}
+                        aria-label={isPlaying ? "Pause" : "Play"}
+                      >
+                        {isPlaying ? (
+                          <Pause className="h-4 w-4" />
+                        ) : (
+                          <Play className="h-4 w-4" />
+                        )}
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="secondary"
+                        onClick={() => handleFrameStep(true)}
+                        title="Next frame"
+                        aria-label="Next frame"
+                      >
+                        <SkipForward className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={resetTrim}
+                        title="Reset trim"
+                        aria-label="Reset trim"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {/* Timeline: separate scrubber + filmstrip with handles */}
+                    <div className="space-y-2">
+                      {/* Scrubber */}
+                      <div
+                        className="relative w-full select-none cursor-pointer py-2"
+                        onPointerDown={handleTimelinePointerDown}
+                      >
+                        <div className="h-1 w-full rounded-full bg-muted-foreground/20" />
+                        {videoDuration > 0 && (
+                          <div
+                            className="pointer-events-none absolute top-1/2 z-20 h-5 w-px -translate-y-1/2 bg-foreground"
+                            style={{ left: `${(currentTime / videoDuration) * 100}%` }}
+                          />
+                        )}
+                      </div>
+
+                      {/* Filmstrip with handles */}
+                      <div
+                        ref={filmstripRef}
+                        className="relative w-full h-16 rounded-md overflow-hidden bg-muted/20 ring-1 ring-border"
+                      >
+                    <div className="flex h-full w-full">
+                      {thumbnails.length > 0
+                        ? thumbnails.map((src, i) => (
+                            <img
+                              key={i}
+                              src={src}
+                              alt="thumb"
+                              className="h-full w-[96px] flex-none object-cover select-none"
+                              draggable={false}
+                            />
+                          ))
+                        : (
+                            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
+                              Generating preview…
+                            </div>
+                          )}
+                    </div>
+
+                    {/* Overlays to dim outside selection */}
+                    {videoDuration > 0 && (
+                      <>
+                        <div
+                          className="absolute inset-y-0 left-0 bg-background/70"
+                          style={{ width: `${(trimStart / videoDuration) * 100}%` }}
+                        />
+                        <div
+                          className="absolute inset-y-0 right-0 bg-background/70"
+                          style={{ width: `${((videoDuration - trimEnd) / videoDuration) * 100}%` }}
+                        />
+                        {/* Selection outline */}
+                        <div
+                          className="pointer-events-none absolute inset-y-0 border-2 border-foreground/60"
+                          style={{
+                            left: `${(trimStart / videoDuration) * 100}%`,
+                            width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
+                          }}
+                        />
+                        {/* Start handle */}
+                        <div
+                          role="button"
+                          aria-label="Trim start"
+                          className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
+                          style={{ left: `${(trimStart / videoDuration) * 100}%` }}
+                          onPointerDown={(e) => handleTrimHandlePointerDown(e, "start")}
+                        >
+                          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
+                        </div>
+                        {/* End handle */}
+                        <div
+                          role="button"
+                          aria-label="Trim end"
+                          className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
+                          style={{ left: `${(trimEnd / videoDuration) * 100}%` }}
+                          onPointerDown={(e) => handleTrimHandlePointerDown(e, "end")}
+                        >
+                          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Trim chips */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground font-mono tabular-nums">
+                    <span className="rounded-md bg-muted px-2 py-1">Start: {formatTime(trimStart)}</span>
+                    <span className="rounded-md bg-muted px-2 py-1">Duration: {formatTime(trimEnd - trimStart)}</span>
+                    <span className="rounded-md bg-muted px-2 py-1">End: {formatTime(trimEnd)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
-        </div>{" "}
-        {/* End of wrapper div */}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+        </div>
+      )}
+    </>
   );
 }
