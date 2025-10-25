@@ -79,6 +79,8 @@ export function VideoCompressor() {
     "auto" | "very_low" | "low" | "medium" | "high" | "very_high"
   >("auto");
   const [targetSizeMB, setTargetSizeMB] = useState<number>(10);
+  const [compressionAttempt, setCompressionAttempt] = useState(0);
+  const [currentQualityLevel, setCurrentQualityLevel] = useState<string>("");
 
   // Format options with pros/cons
   const formatOptions = [
@@ -866,7 +868,7 @@ export function VideoCompressor() {
     });
   };
 
-  // Compress using Mediabunny Conversion (fast path)
+  // Compress using Mediabunny Conversion with automated quality iteration
   const compressWithMediabunny = async () => {
     if (!originalVideo) return;
 
@@ -875,54 +877,29 @@ export function VideoCompressor() {
     setCompressedVideo(null);
     setCompressedSize(null);
     setProgress(0);
+    setCompressionAttempt(0);
 
     toast.loading("Converting…", {
       id: "compress",
-      description: "Starting",
+      description: "Starting automated compression",
       duration: Infinity,
     });
 
+    // Quality levels to try in descending order (highest to lowest)
+    const qualityLevels = [
+      { name: "very_high", quality: MB_QUALITY_VERY_HIGH },
+      { name: "high", quality: MB_QUALITY_HIGH },
+      { name: "medium", quality: MB_QUALITY_MEDIUM },
+      { name: "low", quality: MB_QUALITY_LOW },
+      { name: "very_low", quality: MB_QUALITY_VERY_LOW },
+    ];
+
+    const targetBytes = targetSizeMB * 1024 * 1024;
+    let bestResult: { blob: Blob; url: string; quality: string } | null = null;
+    let lastAttemptSize = 0;
+
     try {
-      // Prepare input and output
-      const input = new MBInput({
-        source: new MBBlobSource(originalVideo),
-        formats: MB_ALL_FORMATS,
-      });
-
-      // Choose output container based on selection
-      const format =
-        outputFormat === "mp4-h264"
-          ? new MBMp4OutputFormat()
-          : new MBWebMOutputFormat();
-
-      const target = new MBBufferTarget();
-      const output = new MBOutput({ format, target });
-
-      // Compute quality/bitrates and resize similar to Browser path
-      const effectiveDuration = Math.max(0.01, (trimEnd || videoDuration) - (trimStart || 0));
-      const TARGET_SIZE_BITS = (targetSizeMB * 0.93) * 8 * 1024 * 1024;
-      const videoTargetBits = TARGET_SIZE_BITS * 0.65;
-      const targetVideoBitrate = Math.floor(videoTargetBits / effectiveDuration);
-      const computedVideoBps = Math.max(300000, Math.min(targetVideoBitrate, 3500000));
-      const audioBitsPerSecond = effectiveDuration > 60 ? 96000 : 128000;
-
-      // Map quality preset
-      const qualityMap = {
-        very_low: MB_QUALITY_VERY_LOW,
-        low: MB_QUALITY_LOW,
-        medium: MB_QUALITY_MEDIUM,
-        high: MB_QUALITY_HIGH,
-        very_high: MB_QUALITY_VERY_HIGH,
-      } as const;
-
-      // Decide bitrate param (number or Quality)
-      const videoBitrateParam =
-        qualityPreset === "auto" ? computedVideoBps : qualityMap[qualityPreset];
-
-      // Size/resolution scaling
-      let targetWidth = 0;
-      let targetHeight = 0;
-      // Probe dimensions via a video element (we already have preview video)
+      // Probe dimensions once
       const v = document.createElement("video");
       v.src = videoObjectUrl || URL.createObjectURL(originalVideo);
       await new Promise<void>((resolve) => {
@@ -930,83 +907,156 @@ export function VideoCompressor() {
         v.addEventListener("loadedmetadata", done, { once: true });
         if (v.readyState >= 1) resolve();
       });
-      // Use same scaling heuristic
-      let scaleFactor = 1;
-      if (typeof videoBitrateParam === "number") {
-        if (videoBitrateParam < 1000000) scaleFactor = 0.5;
-        else if (videoBitrateParam < 2000000) scaleFactor = 0.65;
-        else if (videoBitrateParam < 3000000) scaleFactor = 0.75;
-        else scaleFactor = 0.85;
-      } else {
-        // For quality presets, pick a modest upscale limit
-        scaleFactor = 0.85;
-      }
-      targetWidth = Math.max(2, Math.floor(v.videoWidth * scaleFactor));
-      targetHeight = Math.max(2, Math.floor(v.videoHeight * scaleFactor));
-      targetWidth -= targetWidth % 2;
-      targetHeight -= targetHeight % 2;
-      const MAX_DIMENSION = 1280;
-      if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
-        if (targetWidth > targetHeight) {
-          const ratio = MAX_DIMENSION / targetWidth;
-          targetWidth = MAX_DIMENSION;
-          targetHeight = Math.floor(targetHeight * ratio);
-        } else {
-          const ratio = MAX_DIMENSION / targetHeight;
-          targetHeight = MAX_DIMENSION;
-          targetWidth = Math.floor(targetWidth * ratio);
+
+      const effectiveDuration = Math.max(0.01, (trimEnd || videoDuration) - (trimStart || 0));
+      const audioBitsPerSecond = effectiveDuration > 60 ? 96000 : 128000;
+
+      // Iterate through quality levels from highest to lowest
+      for (let i = 0; i < qualityLevels.length; i++) {
+        const { name, quality } = qualityLevels[i];
+        setCompressionAttempt(i + 1);
+        setCurrentQualityLevel(name);
+        setProgress(0);
+
+        toast.loading("Converting…", {
+          id: "compress",
+          description: `Attempt ${i + 1}/${qualityLevels.length}: ${name} quality`,
+          duration: Infinity,
+        });
+
+        // Prepare input and output for this attempt
+        const input = new MBInput({
+          source: new MBBlobSource(originalVideo),
+          formats: MB_ALL_FORMATS,
+        });
+
+        const format =
+          outputFormat === "mp4-h264"
+            ? new MBMp4OutputFormat()
+            : new MBWebMOutputFormat();
+
+        const target = new MBBufferTarget();
+        const output = new MBOutput({ format, target });
+
+        // Calculate dimensions based on quality level
+        let scaleFactor = 1;
+        switch (name) {
+          case "very_high":
+            scaleFactor = 0.95;
+            break;
+          case "high":
+            scaleFactor = 0.85;
+            break;
+          case "medium":
+            scaleFactor = 0.75;
+            break;
+          case "low":
+            scaleFactor = 0.65;
+            break;
+          case "very_low":
+            scaleFactor = 0.5;
+            break;
         }
+
+        let targetWidth = Math.max(2, Math.floor(v.videoWidth * scaleFactor));
+        let targetHeight = Math.max(2, Math.floor(v.videoHeight * scaleFactor));
         targetWidth -= targetWidth % 2;
         targetHeight -= targetHeight % 2;
+
+        const MAX_DIMENSION = 1280;
+        if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
+          if (targetWidth > targetHeight) {
+            const ratio = MAX_DIMENSION / targetWidth;
+            targetWidth = MAX_DIMENSION;
+            targetHeight = Math.floor(targetHeight * ratio);
+          } else {
+            const ratio = MAX_DIMENSION / targetHeight;
+            targetHeight = MAX_DIMENSION;
+            targetWidth = Math.floor(targetWidth * ratio);
+          }
+          targetWidth -= targetWidth % 2;
+          targetHeight -= targetHeight % 2;
+        }
+
+        // Initialize conversion
+        const conv = await MBConversion.init({
+          input,
+          output,
+          trim:
+            videoDuration > 0
+              ? { start: Math.max(0, trimStart), end: Math.min(videoDuration, trimEnd || videoDuration) }
+              : undefined,
+          video: {
+            codec: outputFormat === "mp4-h264" ? ("avc" as any) : ("vp9" as any),
+            bitrate: quality as any,
+            width: targetWidth || undefined,
+            forceTranscode: true,
+          },
+          audio: {
+            codec: outputFormat === "mp4-h264" ? ("aac" as any) : ("opus" as any),
+            bitrate: audioBitsPerSecond as any,
+            forceTranscode: true,
+          },
+        });
+
+        // Progress updates
+        conv.onProgress = (p: number) => {
+          const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+          setProgress(pct);
+          toast.loading("Converting…", {
+            id: "compress",
+            description: `Attempt ${i + 1}/${qualityLevels.length}: ${name} - ${pct}%`,
+            duration: Infinity,
+          });
+        };
+
+        // Execute conversion
+        await conv.execute();
+
+        const buffer = target.buffer as ArrayBuffer;
+        const mime = outputFormat === "mp4-h264" ? "video/mp4" : "video/webm";
+        const blob = new Blob([buffer], { type: mime });
+        lastAttemptSize = blob.size;
+
+        console.log(`Attempt ${i + 1} (${name}): ${formatFileSize(blob.size)} / ${formatFileSize(targetBytes)} target`);
+
+        // Check if this result meets the target size
+        if (blob.size <= targetBytes) {
+          // Success! This quality level produces a file under the target size
+          const url = URL.createObjectURL(blob);
+          bestResult = { blob, url, quality: name };
+          
+          toast.success("Compression complete", {
+            id: "compress",
+            description: `${formatFileSize(blob.size)} with ${name} quality (${i + 1}/${qualityLevels.length} attempts)`,
+          });
+          
+          break;
+        } else {
+          // File is still too large, try next quality level
+          if (i === qualityLevels.length - 1) {
+            // This was the last attempt, use it anyway
+            const url = URL.createObjectURL(blob);
+            bestResult = { blob, url, quality: name };
+            
+            toast.warning("Compression complete", {
+              id: "compress",
+              description: `${formatFileSize(blob.size)} (exceeds ${targetSizeMB}MB target, used lowest quality)`,
+            });
+          } else {
+            // Continue to next quality level
+            console.log(`File too large (${formatFileSize(blob.size)}), trying lower quality...`);
+          }
+        }
       }
 
-      // Initialize conversion with trim and encoding options
-      const conv = await MBConversion.init({
-        input,
-        output,
-        trim:
-          videoDuration > 0
-            ? { start: Math.max(0, trimStart), end: Math.min(videoDuration, trimEnd || videoDuration) }
-            : undefined,
-        video: {
-          // container -> codec mapping; let library choose best if undefined
-          codec: outputFormat === "mp4-h264" ? ("avc" as any) : ("vp9" as any),
-          bitrate: videoBitrateParam as any,
-          width: targetWidth || undefined,
-          // Don't provide height when width is set to avoid requiring `fit`
-          forceTranscode: true,
-        },
-        audio: {
-          codec: outputFormat === "mp4-h264" ? ("aac" as any) : ("opus" as any),
-          bitrate: audioBitsPerSecond as any,
-          forceTranscode: true,
-        },
-      });
-
-      // Progress updates
-      conv.onProgress = (p: number) => {
-        const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
-        setProgress(pct);
-        toast.loading("Converting…", { id: "compress", description: `${pct}%`, duration: Infinity });
-      };
-
-      // Execute conversion (no progress callback available in basic API)
-      await conv.execute();
-
-      const buffer = target.buffer as ArrayBuffer;
-      const mime = outputFormat === "mp4-h264" ? "video/mp4" : "video/webm";
-      const blob = new Blob([buffer], { type: mime });
-      const url = URL.createObjectURL(blob);
-
-      setCompressedVideo(url);
-      setCompressedSize(blob.size);
-      setRecordedMimeType(mime);
-      setProgress(100);
-
-      toast.success("Conversion complete", {
-        id: "compress",
-        description: formatFileSize(blob.size),
-      });
+      // Apply the best result
+      if (bestResult) {
+        setCompressedVideo(bestResult.url);
+        setCompressedSize(bestResult.blob.size);
+        setRecordedMimeType(outputFormat === "mp4-h264" ? "video/mp4" : "video/webm");
+        setProgress(100);
+      }
     } catch (e: any) {
       console.error("Mediabunny conversion failed", e);
       setError(e?.message || "Mediabunny conversion failed");
@@ -1137,26 +1187,8 @@ export function VideoCompressor() {
                   </Select>
                   {encodeEngine === "mediabunny" && (
                     <div className="text-xs text-muted-foreground">
-                      Faster conversion with quality presets. Trim supported.
+                      Automatically finds the best quality to meet your target size.
                     </div>
-                  )}
-
-                  {encodeEngine === "mediabunny" && (
-                    <>
-                      <label className="text-sm font-medium mt-4 block">Quality</label>
-                      <Select value={qualityPreset} onValueChange={(v) => setQualityPreset(v as any)}>
-                        <SelectTrigger aria-label="Select quality preset">
-                          <SelectValue placeholder="Select quality" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {qualityOptions.map((q) => (
-                            <SelectItem key={q.value} value={q.value}>
-                              {q.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </>
                   )}
 
                   <label className="text-sm font-medium mt-4 block">Target Size</label>
@@ -1211,7 +1243,13 @@ export function VideoCompressor() {
                   <div className="space-y-2">
                     <Progress value={progress} className="w-full" />
                     <p className="text-center text-sm text-muted-foreground">
-                      Compressing... {progress}%
+                      {compressionAttempt > 0 && currentQualityLevel ? (
+                        <>
+                          Attempt {compressionAttempt}/5: {currentQualityLevel} quality - {progress}%
+                        </>
+                      ) : (
+                        <>Compressing... {progress}%</>
+                      )}
                     </p>
                   </div>
                 )}
