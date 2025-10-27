@@ -28,15 +28,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <div className="min-h-screen bg-background">
-            <header className="container mx-auto p-4 flex justify-end">
-              <ThemeToggle />
-            </header>
-            {children}
-          </div>
+          {children}
           <Toaster position="top-center" richColors closeButton />
         </ThemeProvider>
-        <VersionLabel />
         <script
           data-name="BMC-Widget"
           data-cfasync="false"

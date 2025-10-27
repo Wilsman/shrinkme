@@ -1,7 +1,6 @@
 "use client";
 
 import type React from "react";
-
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -31,10 +30,18 @@ import {
   Pause,
   SkipForward,
   SkipBack,
+  Settings,
+  Film,
+  Zap,
+  FileVideo,
+  CheckCircle,
+  Loader2,
+  Sparkles,
+  Repeat,
 } from "lucide-react";
 import { formatFileSize } from "@/lib/utils";
 import { toast } from "sonner";
-// Mediabunny for faster conversion
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Input as MBInput,
   Output as MBOutput,
@@ -63,6 +70,7 @@ export function VideoCompressor() {
   const [compressedSize, setCompressedSize] = useState<number | null>(null);
   const [videoDuration, setVideoDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [isLooping, setIsLooping] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
@@ -387,7 +395,11 @@ export function VideoCompressor() {
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Ignore if starting drag on the slider (thumbs or track) so trim dragging isn't hijacked
     const targetEl = e.target as HTMLElement;
-    if (targetEl.closest('.timeline-slider') || targetEl.closest('[role="slider"]')) return;
+    if (
+      targetEl.closest(".timeline-slider") ||
+      targetEl.closest('[role="slider"]')
+    )
+      return;
 
     const timelineRect = e.currentTarget.getBoundingClientRect();
 
@@ -559,7 +571,7 @@ export function VideoCompressor() {
       );
 
       // Target size: Use 93% of selected target to ensure we stay below the limit
-      const TARGET_SIZE_BITS = (targetSizeMB * 0.93) * 8 * 1024 * 1024;
+      const TARGET_SIZE_BITS = targetSizeMB * 0.93 * 8 * 1024 * 1024;
 
       // Calculate target bitrate based on duration to achieve target file size
       // Reserve ~35% for audio and container overhead
@@ -712,7 +724,8 @@ export function VideoCompressor() {
 
       mediaRecorder.onstop = () => {
         // Use the recorder's actual MIME type (ensures audio codec/container alignment)
-        const actualType = mediaRecorder.mimeType || (chunks[0]?.type || "video/webm");
+        const actualType =
+          mediaRecorder.mimeType || chunks[0]?.type || "video/webm";
 
         // Create compressed video blob with the actual type
         const blob = new Blob(chunks, { type: actualType });
@@ -743,12 +756,15 @@ export function VideoCompressor() {
 
         // Toast: finished with details and open action
         const original = originalSize ?? 0;
-        const reduction = original > 0 ? Math.round((1 - finalSize / original) * 100) : null;
+        const reduction =
+          original > 0 ? Math.round((1 - finalSize / original) * 100) : null;
         toast.success("Compression complete", {
           id: "compress",
           description:
             original && reduction !== null
-              ? `${formatFileSize(original)} → ${formatFileSize(finalSize)} • ${reduction}% smaller`
+              ? `${formatFileSize(original)} → ${formatFileSize(
+                  finalSize
+                )} • ${reduction}% smaller`
               : `${formatFileSize(finalSize)}`,
           action: {
             label: "Open",
@@ -825,9 +841,7 @@ export function VideoCompressor() {
 
     const a = document.createElement("a");
     a.href = compressedVideo;
-    const ext = recordedMimeType?.includes("mp4")
-      ? "mp4"
-      : "webm";
+    const ext = recordedMimeType?.includes("mp4") ? "mp4" : "webm";
     a.download = originalVideo
       ? `compressed-${originalVideo.name.replace(/\.[^/.]+$/, "")}.${ext}`
       : `compressed-video.${ext}`;
@@ -908,7 +922,10 @@ export function VideoCompressor() {
         if (v.readyState >= 1) resolve();
       });
 
-      const effectiveDuration = Math.max(0.01, (trimEnd || videoDuration) - (trimStart || 0));
+      const effectiveDuration = Math.max(
+        0.01,
+        (trimEnd || videoDuration) - (trimStart || 0)
+      );
       const audioBitsPerSecond = effectiveDuration > 60 ? 96000 : 128000;
 
       // Iterate through quality levels from highest to lowest
@@ -920,7 +937,9 @@ export function VideoCompressor() {
 
         toast.loading("Converting…", {
           id: "compress",
-          description: `Attempt ${i + 1}/${qualityLevels.length}: ${name} quality`,
+          description: `Attempt ${i + 1}/${
+            qualityLevels.length
+          }: ${name} quality`,
           duration: Infinity,
         });
 
@@ -984,16 +1003,21 @@ export function VideoCompressor() {
           output,
           trim:
             videoDuration > 0
-              ? { start: Math.max(0, trimStart), end: Math.min(videoDuration, trimEnd || videoDuration) }
+              ? {
+                  start: Math.max(0, trimStart),
+                  end: Math.min(videoDuration, trimEnd || videoDuration),
+                }
               : undefined,
           video: {
-            codec: outputFormat === "mp4-h264" ? ("avc" as any) : ("vp9" as any),
+            codec:
+              outputFormat === "mp4-h264" ? ("avc" as any) : ("vp9" as any),
             bitrate: quality as any,
             width: targetWidth || undefined,
             forceTranscode: true,
           },
           audio: {
-            codec: outputFormat === "mp4-h264" ? ("aac" as any) : ("opus" as any),
+            codec:
+              outputFormat === "mp4-h264" ? ("aac" as any) : ("opus" as any),
             bitrate: audioBitsPerSecond as any,
             forceTranscode: true,
           },
@@ -1005,7 +1029,9 @@ export function VideoCompressor() {
           setProgress(pct);
           toast.loading("Converting…", {
             id: "compress",
-            description: `Attempt ${i + 1}/${qualityLevels.length}: ${name} - ${pct}%`,
+            description: `Attempt ${i + 1}/${
+              qualityLevels.length
+            }: ${name} - ${pct}%`,
             duration: Infinity,
           });
         };
@@ -1018,19 +1044,25 @@ export function VideoCompressor() {
         const blob = new Blob([buffer], { type: mime });
         lastAttemptSize = blob.size;
 
-        console.log(`Attempt ${i + 1} (${name}): ${formatFileSize(blob.size)} / ${formatFileSize(targetBytes)} target`);
+        console.log(
+          `Attempt ${i + 1} (${name}): ${formatFileSize(
+            blob.size
+          )} / ${formatFileSize(targetBytes)} target`
+        );
 
         // Check if this result meets the target size
         if (blob.size <= targetBytes) {
           // Success! This quality level produces a file under the target size
           const url = URL.createObjectURL(blob);
           bestResult = { blob, url, quality: name };
-          
+
           toast.success("Compression complete", {
             id: "compress",
-            description: `${formatFileSize(blob.size)} with ${name} quality (${i + 1}/${qualityLevels.length} attempts)`,
+            description: `${formatFileSize(blob.size)} with ${name} quality (${
+              i + 1
+            }/${qualityLevels.length} attempts)`,
           });
-          
+
           break;
         } else {
           // File is still too large, try next quality level
@@ -1038,14 +1070,20 @@ export function VideoCompressor() {
             // This was the last attempt, use it anyway
             const url = URL.createObjectURL(blob);
             bestResult = { blob, url, quality: name };
-            
+
             toast.warning("Compression complete", {
               id: "compress",
-              description: `${formatFileSize(blob.size)} (exceeds ${targetSizeMB}MB target, used lowest quality)`,
+              description: `${formatFileSize(
+                blob.size
+              )} (exceeds ${targetSizeMB}MB target, used lowest quality)`,
             });
           } else {
             // Continue to next quality level
-            console.log(`File too large (${formatFileSize(blob.size)}), trying lower quality...`);
+            console.log(
+              `File too large (${formatFileSize(
+                blob.size
+              )}), trying lower quality...`
+            );
           }
         }
       }
@@ -1054,7 +1092,9 @@ export function VideoCompressor() {
       if (bestResult) {
         setCompressedVideo(bestResult.url);
         setCompressedSize(bestResult.blob.size);
-        setRecordedMimeType(outputFormat === "mp4-h264" ? "video/mp4" : "video/webm");
+        setRecordedMimeType(
+          outputFormat === "mp4-h264" ? "video/mp4" : "video/webm"
+        );
         setProgress(100);
       }
     } catch (e: any) {
@@ -1070,438 +1110,656 @@ export function VideoCompressor() {
   };
 
   return (
-    <>
-      {/* Title Badge - Only show when video is loaded */}
-      {originalVideo && (
-        <div className="absolute top-4 left-4 z-10">
-          <div className="bg-background/80 backdrop-blur-sm border border-border rounded-lg px-3 py-1.5 shadow-lg">
-            <h1 className="text-sm font-bold bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
-              Video Compressor
-            </h1>
-          </div>
-        </div>
-      )}
-
-      {!originalVideo ? (
-        // Initial Clean View - Just the drop area
-        <div className="flex-1 flex items-center justify-center">
-          <div
-            className="w-full max-w-2xl p-16 border-2 border-dashed rounded-2xl hover:border-primary transition-all duration-300 bg-muted/30 ring-1 ring-border hover:ring-primary/50 cursor-pointer"
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              e.currentTarget.classList.add("border-primary");
-            }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              e.currentTarget.classList.remove("border-primary");
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              e.currentTarget.classList.remove("border-primary");
-
-              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                const file = e.dataTransfer.files[0];
-                const event = {
-                  target: { files: [file] },
-                } as unknown as React.ChangeEvent<HTMLInputElement>;
-                handleFileChange(event);
-              }
-            }}
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              accept="video/*"
-              className="hidden"
-            />
-
-            <div className="text-center">
-              <Upload className="mx-auto h-16 w-16 text-muted-foreground mb-4 opacity-50" />
-              <p className="mb-2 text-lg font-medium text-foreground">
-                Drop a video here
-              </p>
-              <p className="text-sm text-muted-foreground mb-6">
-                or click below to select
-              </p>
-              <Button
-                onClick={handleUploadClick}
-                className="mt-2"
-                size="lg"
-                disabled={!isReady}
-                aria-label="Select video to upload"
-              >
-                <Upload className="mr-2 h-5 w-5" />
-                Select Video
-              </Button>
-              <p className="text-xs text-muted-foreground mt-4">
-                Supports MP4, MOV, AVI, WebM
-              </p>
+    <div className="min-h-screen bg-[#0C0C0C]">
+      {/* Header */}
+      <div className="border-b border-zinc-800 bg-[#0C0C0C]/95 backdrop-blur-sm">
+        <div className="container mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                <Film className="h-6 w-6" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                  Video Compressor
+                </h1>
+                <p className="text-sm text-zinc-400">
+                  Compress videos while maintaining quality
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              {originalVideo && (
+                <div className="flex items-center space-x-2 text-sm text-zinc-400">
+                  <FileVideo className="h-4 w-4" />
+                  <span className="font-medium">{originalVideo.name}</span>
+                  <span className="rounded-full bg-zinc-800 px-2 py-1">
+                    {formatFileSize(originalSize || 0)}
+                  </span>
+                </div>
+              )}
+              <ThemeToggle />
             </div>
           </div>
         </div>
-      ) : (
-        // Two-column layout when video is loaded
-        <div className="flex-1 flex gap-4 overflow-hidden">
-          {/* Left Column - Controls */}
-          <Card className="w-[420px] flex-shrink-0 overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/30">
-            <CardHeader className="pt-10 pb-3">
-              <CardTitle className="text-lg bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
-                Controls
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="overflow-y-auto max-h-[calc(100vh-16rem)]">
-              {error && (
-                <Alert variant="destructive" className="mb-4">
-                  <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-              <div className="w-full space-y-4">
-                <div className="text-center space-y-1">
-                  <p className="font-medium truncate" title={originalVideo.name}>{originalVideo.name}</p>
-                  {originalSize && (
-                    <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="rounded-md bg-muted px-2 py-0.5">Original: {formatFileSize(originalSize)}</span>
-                    </div>
-                  )}
-                </div>
+      </div>
 
-                {/* Encoder and quality/format selection */}
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Encoder</label>
-                  <Select value={encodeEngine} onValueChange={(v) => setEncodeEngine(v as any)}>
-                    <SelectTrigger aria-label="Select encoder engine">
-                      <SelectValue placeholder="Select encoder" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {engineOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label} — {option.description}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {encodeEngine === "mediabunny" && (
-                    <div className="text-xs text-muted-foreground">
-                      Automatically finds the best quality to meet your target size.
-                    </div>
-                  )}
+      {/* Main Content */}
+      <div className="container mx-auto px-6 py-8">
+        {!originalVideo ? (
+          // Upload State
+          <div className="flex min-h-[600px] items-center justify-center">
+            <div className="w-full max-w-2xl">
+              <div
+                className="group relative overflow-hidden rounded-3xl border-2 border-dashed border-zinc-700 bg-zinc-900/50 p-12 transition-all duration-300 hover:border-blue-500 hover:shadow-2xl"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.currentTarget.classList.add("border-blue-500", "bg-blue-950/30");
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.currentTarget.classList.remove("border-blue-500", "bg-blue-950/30");
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.currentTarget.classList.remove("border-blue-500", "bg-blue-950/30");
 
-                  <label className="text-sm font-medium mt-4 block">Target Size</label>
-                  <Select value={targetSizeMB.toString()} onValueChange={(v) => setTargetSizeMB(Number(v))}>
-                    <SelectTrigger aria-label="Select target size">
-                      <SelectValue placeholder="Select target size" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {targetSizeOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value.toString()}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="text-xs text-muted-foreground">
-                    Output will be compressed to stay under {targetSizeMB} MB (approximately {(targetSizeMB * 0.93).toFixed(1)} MB)
+                  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    const file = e.dataTransfer.files[0];
+                    const event = {
+                      target: { files: [file] },
+                    } as unknown as React.ChangeEvent<HTMLInputElement>;
+                    handleFileChange(event);
+                  }
+                }}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="video/*"
+                  className="hidden"
+                />
+
+                <div className="text-center">
+                  <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-blue-900/30 to-purple-900/30">
+                    <Upload className="h-10 w-10 text-blue-400" />
                   </div>
-
-                  <label className="text-sm font-medium mt-4 block">Output Format</label>
-                  <Select value={outputFormat} onValueChange={setOutputFormat}>
-                    <SelectTrigger aria-label="Select output format">
-                      <SelectValue placeholder="Select format" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {formatOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label} — {option.description}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="text-xs text-muted-foreground">
-                    {formatOptions.find((o) => o.value === outputFormat)?.pros} |
-                    {formatOptions.find((o) => o.value === outputFormat)?.cons}
-                  </div>
-                </div>
-
-                {!compressedVideo && !isCompressing && (
-                  <Button
-                    onClick={compressVideo}
-                    className="w-full"
-                    disabled={!isReady || !originalVideo}
-                    aria-label="Compress video"
-                  >
-                    <Scissors className="mr-2 h-4 w-4" />
-                    Compress Video
-                  </Button>
-                )}
-
-                {isCompressing && (
-                  <div className="space-y-2">
-                    <Progress value={progress} className="w-full" />
-                    <p className="text-center text-sm text-muted-foreground">
-                      {compressionAttempt > 0 && currentQualityLevel ? (
-                        <>
-                          Attempt {compressionAttempt}/5: {currentQualityLevel} quality - {progress}%
-                        </>
-                      ) : (
-                        <>Compressing... {progress}%</>
-                      )}
-                    </p>
-                  </div>
-                )}
-
-                {compressedVideo && compressedSize && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="rounded-md bg-muted px-2 py-0.5">Original: {formatFileSize(originalSize!)}</span>
-                      <span className="rounded-md bg-muted px-2 py-0.5">Compressed: {formatFileSize(compressedSize)}</span>
-                    </div>
-
-                    <div className="text-center text-sm text-muted-foreground">
-                      {originalSize && compressedSize && (
-                        <span className="rounded-md bg-emerald-500/10 text-emerald-500 px-2 py-0.5">
-                          Reduced by {Math.round((1 - compressedSize / originalSize) * 100)}%
-                        </span>
-                      )}
-                    </div>
-
-                    <Button
-                      onClick={downloadCompressedVideo}
-                      className="w-full"
-                      variant="secondary"
-                      aria-label="Download compressed video"
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      Download Compressed Video
-                    </Button>
-
-                    <Button
-                      onClick={resetCompressor}
-                      variant="outline"
-                      className="w-full"
-                      aria-label="Compress another video"
-                    >
-                      <Upload className="mr-2 h-4 w-4" />
-                      Compress Another
-                    </Button>
-                  </div>
-                )}
-
-                {!compressedVideo && (
+                  <h2 className="mb-3 text-2xl font-semibold text-zinc-100">
+                    Drop your video here
+                  </h2>
+                  <p className="mb-8 text-zinc-400">
+                    or click the button below to browse
+                  </p>
                   <Button
                     onClick={handleUploadClick}
-                    variant="ghost"
-                    className="w-full"
-                    aria-label="Select a different video"
+                    size="lg"
+                    className="h-12 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 px-8 font-medium text-white shadow-lg transition-all hover:shadow-xl hover:scale-105"
+                    disabled={!isReady}
                   >
-                    Select Different Video
+                    <Upload className="mr-2 h-5 w-5" />
+                    Select Video
                   </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Right Column - Video Preview & Trimmer */}
-          <Card className="flex-1 overflow-hidden border-muted-foreground/20 shadow-xl bg-gradient-to-b from-background to-muted/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
-                {compressedVideo ? "Preview" : "Video Preview & Trim"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-[calc(100vh-18rem)] flex flex-col">
-              {!originalVideo ? (
-                <div className="flex-1 flex items-center justify-center text-muted-foreground">
-                  <div className="text-center">
-                    <Upload className="mx-auto h-16 w-16 mb-4 opacity-50" />
-                    <p>Upload a video to get started</p>
+                  <div className="mt-6 flex items-center justify-center space-x-6 text-xs text-zinc-500">
+                    <span className="flex items-center">
+                      <CheckCircle className="mr-1 h-3 w-3" />
+                      MP4, MOV, AVI
+                    </span>
+                    <span className="flex items-center">
+                      <Zap className="mr-1 h-3 w-3" />
+                      Fast processing
+                    </span>
+                    <span className="flex items-center">
+                      <Sparkles className="mr-1 h-3 w-3" />
+                      Quality preserved
+                    </span>
                   </div>
                 </div>
-              ) : compressedVideo ? (
-                <Tabs defaultValue="compressed" className="flex-1 flex flex-col">
-                  <TabsList className="grid w-full grid-cols-2 mb-4">
-                    <TabsTrigger value="original">Original</TabsTrigger>
-                    <TabsTrigger value="compressed">Compressed</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="original" className="flex-1 mt-0">
-                    <video
-                      src={videoObjectUrl!}
-                      controls
-                      className="w-full h-full rounded-lg object-contain bg-black"
-                      playsInline
-                    />
-                  </TabsContent>
-                  <TabsContent value="compressed" className="flex-1 mt-0">
-                    <video
-                      src={compressedVideo}
-                      controls
-                      className="w-full h-full rounded-lg object-contain bg-black"
-                      playsInline
-                    />
-                  </TabsContent>
-                </Tabs>
-              ) : (
-                <div className="flex-1 flex flex-col space-y-3">
-                  <div className="flex-1 bg-black rounded-xl overflow-hidden ring-1 ring-border">
-                    <video
-                      ref={videoPreviewRef}
-                      src={videoObjectUrl!}
-                      className="w-full h-full object-contain"
-                      playsInline
-                      onClick={togglePlayPause}
-                      onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                    />
-                  </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          // Editor State
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+            {/* Left Panel - Settings */}
+            <div className="lg:col-span-1">
+              <Card className="h-full border-0 bg-zinc-900/50 shadow-xl backdrop-blur-sm">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center text-lg text-zinc-100">
+                    <Settings className="mr-2 h-5 w-5" />
+                    Compression Settings
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {error && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                  )}
 
+                  {/* Encoder Selection */}
                   <div className="space-y-3">
-                    {/* Timecodes */}
-                    <div className="flex items-center justify-between text-xs sm:text-sm text-muted-foreground font-mono tabular-nums">
-                      <span>Current: {formatTime(currentTime)}</span>
-                      <span>Duration: {formatTime(videoDuration)}</span>
-                    </div>
-
-                    {/* Playback controls */}
-                    <div className="flex items-center justify-center gap-2">
-                      <Button
-                        size="icon"
-                        variant="secondary"
-                        onClick={() => handleFrameStep(false)}
-                        title="Previous frame"
-                        aria-label="Previous frame"
-                      >
-                        <SkipBack className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="default"
-                        onClick={togglePlayPause}
-                        aria-label={isPlaying ? "Pause" : "Play"}
-                      >
-                        {isPlaying ? (
-                          <Pause className="h-4 w-4" />
-                        ) : (
-                          <Play className="h-4 w-4" />
-                        )}
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="secondary"
-                        onClick={() => handleFrameStep(true)}
-                        title="Next frame"
-                        aria-label="Next frame"
-                      >
-                        <SkipForward className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        onClick={resetTrim}
-                        title="Reset trim"
-                        aria-label="Reset trim"
-                      >
-                        <RotateCcw className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    {/* Timeline: separate scrubber + filmstrip with handles */}
-                    <div className="space-y-2">
-                      {/* Scrubber */}
-                      <div
-                        className="relative w-full select-none cursor-pointer py-2"
-                        onPointerDown={handleTimelinePointerDown}
-                      >
-                        <div className="h-1 w-full rounded-full bg-muted-foreground/20" />
-                        {videoDuration > 0 && (
-                          <div
-                            className="pointer-events-none absolute top-1/2 z-20 h-5 w-px -translate-y-1/2 bg-foreground"
-                            style={{ left: `${(currentTime / videoDuration) * 100}%` }}
-                          />
-                        )}
-                      </div>
-
-                      {/* Filmstrip with handles */}
-                      <div
-                        ref={filmstripRef}
-                        className="relative w-full h-16 rounded-md overflow-hidden bg-muted/20 ring-1 ring-border"
-                      >
-                    <div className="flex h-full w-full">
-                      {thumbnails.length > 0
-                        ? thumbnails.map((src, i) => (
-                            <img
-                              key={i}
-                              src={src}
-                              alt="thumb"
-                              className="h-full w-[96px] flex-none object-cover select-none"
-                              draggable={false}
-                            />
-                          ))
-                        : (
-                            <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
-                              Generating preview…
+                    <label className="text-sm font-medium text-zinc-300">
+                      Encoding Engine
+                    </label>
+                    <Select
+                      value={encodeEngine}
+                      onValueChange={(v) => setEncodeEngine(v as any)}
+                    >
+                      <SelectTrigger className="h-11 bg-zinc-800 border-zinc-700 text-zinc-100">
+                        <SelectValue placeholder="Select encoder" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-800 border-zinc-700">
+                        {engineOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value} className="text-zinc-100">
+                            <div>
+                              <div className="font-medium">{option.label}</div>
+                              <div className="text-xs text-zinc-400">
+                                {option.description}
+                              </div>
                             </div>
-                          )}
-                    </div>
-
-                    {/* Overlays to dim outside selection */}
-                    {videoDuration > 0 && (
-                      <>
-                        <div
-                          className="absolute inset-y-0 left-0 bg-background/70"
-                          style={{ width: `${(trimStart / videoDuration) * 100}%` }}
-                        />
-                        <div
-                          className="absolute inset-y-0 right-0 bg-background/70"
-                          style={{ width: `${((videoDuration - trimEnd) / videoDuration) * 100}%` }}
-                        />
-                        {/* Selection outline */}
-                        <div
-                          className="pointer-events-none absolute inset-y-0 border-2 border-foreground/60"
-                          style={{
-                            left: `${(trimStart / videoDuration) * 100}%`,
-                            width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
-                          }}
-                        />
-                        {/* Start handle */}
-                        <div
-                          role="button"
-                          aria-label="Trim start"
-                          className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
-                          style={{ left: `${(trimStart / videoDuration) * 100}%` }}
-                          onPointerDown={(e) => handleTrimHandlePointerDown(e, "start")}
-                        >
-                          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
-                        </div>
-                        {/* End handle */}
-                        <div
-                          role="button"
-                          aria-label="Trim end"
-                          className="absolute inset-y-0 -translate-x-1/2 w-6 cursor-ew-resize z-20"
-                          style={{ left: `${(trimEnd / videoDuration) * 100}%` }}
-                          onPointerDown={(e) => handleTrimHandlePointerDown(e, "end")}
-                        >
-                          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-3 bg-foreground/90 shadow-sm" />
-                        </div>
-                      </>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {encodeEngine === "mediabunny" && (
+                      <div className="rounded-lg bg-blue-900/20 p-3 text-xs text-blue-300">
+                        <Sparkles className="mr-1 inline h-3 w-3" />
+                        Automatically finds optimal quality for your target size
+                      </div>
                     )}
                   </div>
 
-                  {/* Trim chips */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground font-mono tabular-nums">
-                    <span className="rounded-md bg-muted px-2 py-1">Start: {formatTime(trimStart)}</span>
-                    <span className="rounded-md bg-muted px-2 py-1">Duration: {formatTime(trimEnd - trimStart)}</span>
-                    <span className="rounded-md bg-muted px-2 py-1">End: {formatTime(trimEnd)}</span>
+                  {/* Target Size */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-zinc-300">
+                      Target File Size
+                    </label>
+                    <Select
+                      value={targetSizeMB.toString()}
+                      onValueChange={(v) => setTargetSizeMB(Number(v))}
+                    >
+                      <SelectTrigger className="h-11 bg-zinc-800 border-zinc-700 text-zinc-100">
+                        <SelectValue placeholder="Select target size" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-800 border-zinc-700">
+                        {targetSizeOptions.map((option) => (
+                          <SelectItem
+                            key={option.value}
+                            value={option.value.toString()}
+                            className="text-zinc-100"
+                          >
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-zinc-500">
+                      Output will be compressed to stay under {targetSizeMB} MB
+                    </div>
                   </div>
-                </div>
-              </div>
+
+                  {/* Output Format */}
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium text-zinc-300">
+                      Output Format
+                    </label>
+                    <Select value={outputFormat} onValueChange={setOutputFormat}>
+                      <SelectTrigger className="h-11 bg-zinc-800 border-zinc-700 text-zinc-100">
+                        <SelectValue placeholder="Select format" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-800 border-zinc-700">
+                        {formatOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value} className="text-zinc-100">
+                            <div>
+                              <div className="font-medium">{option.label}</div>
+                              <div className="text-xs text-zinc-400">
+                                {option.description}
+                              </div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="space-y-3 pt-4">
+                    {!compressedVideo && !isCompressing && (
+                      <Button
+                        onClick={compressVideo}
+                        className="h-12 w-full rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 font-medium text-white shadow-lg transition-all hover:shadow-xl"
+                        disabled={!isReady || !originalVideo}
+                      >
+                        <Scissors className="mr-2 h-4 w-4" />
+                        Compress Video
+                      </Button>
+                    )}
+
+                    {isCompressing && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-center">
+                          <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                        </div>
+                        <Progress value={progress} className="h-2" />
+                        <p className="text-center text-sm text-zinc-400">
+                          {compressionAttempt > 0 && currentQualityLevel ? (
+                            <>
+                              Attempt {compressionAttempt}/5: {currentQualityLevel} quality - {progress}%
+                            </>
+                          ) : (
+                            <>Compressing... {progress}%</>
+                          )}
+                        </p>
+                      </div>
+                    )}
+
+                    {compressedVideo && compressedSize && (
+                      <div className="space-y-4">
+                        <div className="rounded-lg bg-green-900/20 p-4 border border-green-800/30">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="text-zinc-400">
+                              Original:
+                            </span>
+                            <span className="font-medium text-zinc-100">
+                              {formatFileSize(originalSize!)}
+                            </span>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between text-sm">
+                            <span className="text-zinc-400">
+                              Compressed:
+                            </span>
+                            <span className="font-medium text-green-400">
+                              {formatFileSize(compressedSize)}
+                            </span>
+                          </div>
+                          {originalSize && compressedSize && (
+                            <div className="mt-3 text-center">
+                              <span className="inline-flex items-center rounded-full bg-green-900/30 px-3 py-1 text-sm font-medium text-green-300">
+                                <CheckCircle className="mr-1 h-3 w-3" />
+                                {Math.round(
+                                  (1 - compressedSize / originalSize) * 100
+                                )}% smaller
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <Button
+                          onClick={downloadCompressedVideo}
+                          className="h-12 w-full rounded-xl font-medium transition-all duration-200 hover:scale-105 hover:shadow-lg"
+                          variant="default"
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          Download Compressed
+                        </Button>
+
+                        <Button
+                          onClick={resetCompressor}
+                          variant="outline"
+                          className="h-12 w-full rounded-xl transition-all duration-200 hover:scale-105 hover:shadow-md border-zinc-700 text-zinc-100 hover:bg-zinc-800"
+                        >
+                          <Upload className="mr-2 h-4 w-4" />
+                          Compress Another
+                        </Button>
+                      </div>
+                    )}
+
+                    {!compressedVideo && (
+                      <Button
+                        onClick={handleUploadClick}
+                        variant="ghost"
+                        className="h-12 w-full rounded-xl transition-all duration-200 hover:scale-105 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+                      >
+                        Choose Different Video
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
-          )}
-        </CardContent>
-      </Card>
-        </div>
-      )}
-    </>
+
+            {/* Right Panel - Video Preview */}
+            <div className="lg:col-span-2">
+              <Card className="h-full border-0 bg-zinc-900/50 shadow-xl backdrop-blur-sm">
+                <CardHeader className="pb-4">
+                  <CardTitle className="flex items-center text-lg text-zinc-100">
+                    <Film className="mr-2 h-5 w-5" />
+                    {compressedVideo ? "Preview Results" : "Video Preview & Trim"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="h-[calc(100%-5rem)]">
+                  {compressedVideo ? (
+                    <Tabs
+                      defaultValue="compressed"
+                      className="flex h-full flex-col"
+                    >
+                      <TabsList className="grid w-full grid-cols-2 bg-zinc-800">
+                        <TabsTrigger value="original" className="text-zinc-300 data-[state=active]:text-zinc-100">Original</TabsTrigger>
+                        <TabsTrigger value="compressed" className="text-zinc-300 data-[state=active]:text-zinc-100">Compressed</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="original" className="flex-1 mt-6">
+                        <video
+                          src={videoObjectUrl!}
+                          controls
+                          className="h-full w-full rounded-xl bg-black object-contain"
+                          playsInline
+                        />
+                      </TabsContent>
+                      <TabsContent value="compressed" className="flex-1 mt-6">
+                        <video
+                          src={compressedVideo}
+                          controls
+                          className="h-full w-full rounded-xl bg-black object-contain"
+                          playsInline
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  ) : (
+                    <div className="flex h-full flex-col space-y-6">
+                      {/* Video Player Container */}
+                      <div className="group relative flex-1 overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-900 to-black shadow-2xl transition-all duration-300 hover:shadow-3xl">
+                        {/* Overlay Controls */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                          <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                            <div className="flex items-center space-x-2 text-white text-sm font-medium">
+                              <Film className="h-4 w-4" />
+                              <span>Video Preview</span>
+                            </div>
+                            <div className="flex items-center space-x-2 text-white text-sm">
+                              <span className="rounded-full bg-white/20 px-2 py-1 backdrop-blur-sm">
+                                {formatFileSize(originalSize || 0)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <video
+                          ref={videoPreviewRef}
+                          src={videoObjectUrl!}
+                          className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                          playsInline
+                          onClick={togglePlayPause}
+                          onTimeUpdate={(e) => {
+                            const currentTime = e.currentTarget.currentTime;
+                            setCurrentTime(currentTime);
+                            
+                            // Handle looping within trimmed area
+                            if (isLooping && isPlaying && currentTime >= trimEnd) {
+                              e.currentTarget.currentTime = trimStart;
+                            }
+                          }}
+                        />
+                        
+                        {/* Center Play Button Overlay */}
+                        {!isPlaying && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-md transition-all duration-300 group-hover:scale-110">
+                              <Play className="h-8 w-8 text-white ml-1" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-6">
+                        {/* Combined Time Display & Playback Controls */}
+                        <div className="rounded-xl bg-zinc-800/50 p-3 border border-zinc-700">
+                          <div className="flex items-center justify-between">
+                            {/* Time Display */}
+                            <div className="flex items-center space-x-4 text-xs font-mono">
+                              <div className="flex items-center space-x-1">
+                                <span className="text-blue-400">Current:</span>
+                                <span className="text-zinc-100 font-medium">{formatTime(currentTime)}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <span className="text-purple-400">Duration:</span>
+                                <span className="text-zinc-100 font-medium">{formatTime(videoDuration)}</span>
+                              </div>
+                              <div className="flex items-center space-x-1">
+                                <span className="text-emerald-400">Remaining:</span>
+                                <span className="text-zinc-100 font-medium">{formatTime(videoDuration - currentTime)}</span>
+                              </div>
+                            </div>
+                            
+                            {/* Playback Controls */}
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                onClick={() => handleFrameStep(false)}
+                                className="h-8 w-8 rounded-lg bg-zinc-800 border-zinc-600 transition-all duration-200 hover:scale-105 hover:bg-zinc-700"
+                                title="Previous frame"
+                              >
+                                <SkipBack className="h-3 w-3 text-zinc-300" />
+                              </Button>
+                              
+                              <Button
+                                size="icon"
+                                onClick={togglePlayPause}
+                                className="h-10 w-10 rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white transition-all duration-200 hover:scale-105 hover:from-blue-600 hover:to-purple-700"
+                                title={isPlaying ? "Pause" : "Play"}
+                              >
+                                {isPlaying ? (
+                                  <Pause className="h-4 w-4" />
+                                ) : (
+                                  <Play className="h-4 w-4 ml-0.5" />
+                                )}
+                              </Button>
+                              
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                onClick={() => handleFrameStep(true)}
+                                className="h-8 w-8 rounded-lg bg-zinc-800 border-zinc-600 transition-all duration-200 hover:scale-105 hover:bg-zinc-700"
+                                title="Next frame"
+                              >
+                                <SkipForward className="h-3 w-3 text-zinc-300" />
+                              </Button>
+                              
+                              <div className="h-px w-4 bg-zinc-700" />
+                              
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => setIsLooping(!isLooping)}
+                                className={`h-8 w-8 rounded-lg transition-all duration-200 hover:scale-105 hover:bg-zinc-800 ${
+                                  isLooping 
+                                    ? 'text-blue-400 bg-blue-900/20 hover:bg-blue-900/30' 
+                                    : 'text-zinc-400 hover:text-zinc-200'
+                                }`}
+                                title={isLooping ? "Looping enabled" : "Looping disabled"}
+                              >
+                                <Repeat className="h-3 w-3" />
+                              </Button>
+                              
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={resetTrim}
+                                className="h-8 w-8 rounded-lg transition-all duration-200 hover:scale-105 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+                                title="Reset trim"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Minimalist Timeline Section */}
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold text-zinc-300">
+                              Trim Video
+                            </h3>
+                            <button
+                              onClick={resetTrim}
+                              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                            >
+                              Reset All
+                            </button>
+                          </div>
+                          
+                          {/* Simple Progress Bar */}
+                          <div
+                            className="relative h-2 w-full cursor-pointer rounded-full bg-zinc-800"
+                            onPointerDown={handleTimelinePointerDown}
+                          >
+                            {videoDuration > 0 && (
+                              <>
+                                {/* Trimmed Area */}
+                                <div
+                                  className="absolute top-0 h-full rounded-full bg-blue-500"
+                                  style={{
+                                    left: `${(trimStart / videoDuration) * 100}%`,
+                                    width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
+                                  }}
+                                />
+                                {/* Current Position */}
+                                <div
+                                  className="absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-white border-2 border-zinc-600 shadow-sm"
+                                  style={{
+                                    left: `${(currentTime / videoDuration) * 100}%`,
+                                  }}
+                                />
+                              </>
+                            )}
+                          </div>
+
+                          {/* Simple Filmstrip */}
+                          <div
+                            ref={filmstripRef}
+                            className="relative h-16 overflow-hidden rounded-lg bg-zinc-800 border border-zinc-700"
+                          >
+                            <div className="flex h-full w-full">
+                              {thumbnails.length > 0 ? (
+                                thumbnails.map((src, i) => (
+                                  <img
+                                    key={i}
+                                    src={src}
+                                    alt="thumb"
+                                    className="h-full w-20 flex-none object-cover"
+                                    draggable={false}
+                                  />
+                                ))
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-xs text-zinc-500">
+                                  Loading...
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Slim Trim Handles */}
+                            {videoDuration > 0 && (
+                              <>
+                                {/* Start Handle */}
+                                <div
+                                  className="absolute inset-y-0 w-12 cursor-ew-resize group z-20"
+                                  style={{
+                                    left: `max(0px, min(${(trimStart / videoDuration) * 100}%, calc(100% - 60px)))`,
+                                  }}
+                                  onPointerDown={(e) =>
+                                    handleTrimHandlePointerDown(e, "start")
+                                  }
+                                >
+                                  {/* Handle Line */}
+                                  <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-gradient-to-b from-transparent via-blue-400 to-transparent" />
+                                  
+                                  {/* Handle Circle */}
+                                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg border border-white/30 transition-all duration-200 group-hover:scale-110">
+                                    <div className="absolute inset-0.5 rounded-full bg-white/40" />
+                                  </div>
+                                  
+                                  {/* Handle Label */}
+                                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                                    <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs font-medium shadow-lg">
+                                      START
+                                      <div className="text-blue-100 font-mono text-xs">{formatTime(trimStart)}</div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* End Handle */}
+                                <div
+                                  className="absolute inset-y-0 w-12 cursor-ew-resize group z-20"
+                                  style={{
+                                    left: `max(60px, min(${(trimEnd / videoDuration) * 100}%, calc(100% - 48px)))`,
+                                  }}
+                                  onPointerDown={(e) =>
+                                    handleTrimHandlePointerDown(e, "end")
+                                  }
+                                >
+                                  {/* Handle Line */}
+                                  <div className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-gradient-to-b from-transparent via-purple-400 to-transparent" />
+                                  
+                                  {/* Handle Circle */}
+                                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg border border-white/30 transition-all duration-200 group-hover:scale-110">
+                                    <div className="absolute inset-0.5 rounded-full bg-white/40" />
+                                  </div>
+                                  
+                                  {/* Handle Label */}
+                                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-200">
+                                    <div className="bg-purple-500 text-white px-2 py-1 rounded text-xs font-medium shadow-lg">
+                                      END
+                                      <div className="text-purple-100 font-mono text-xs">{formatTime(trimEnd)}</div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Inverted Blur - Unselected Areas */}
+                                <div
+                                  className="absolute inset-y-0 left-0 bg-black/40 backdrop-blur-sm"
+                                  style={{
+                                    width: `${(trimStart / videoDuration) * 100}%`,
+                                  }}
+                                />
+                                <div
+                                  className="absolute inset-y-0 right-0 bg-black/40 backdrop-blur-sm"
+                                  style={{
+                                    width: `${
+                                      ((videoDuration - trimEnd) / videoDuration) * 100
+                                    }%`,
+                                  }}
+                                />
+                                
+                                {/* Clear Selected Area */}
+                                <div
+                                  className="absolute inset-y-0 border-y border-blue-400/30"
+                                  style={{
+                                    left: `${(trimStart / videoDuration) * 100}%`,
+                                    width: `${((trimEnd - trimStart) / videoDuration) * 100}%`,
+                                  }}
+                                >
+                                  {/* Duration Label */}
+                                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs text-white font-medium">
+                                    {formatTime(trimEnd - trimStart)}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Simple Time Info */}
+                          <div className="flex items-center justify-between text-xs text-zinc-500 font-mono">
+                            <span>{formatTime(trimStart)}</span>
+                            <span className="text-zinc-300 font-medium">
+                              {formatTime(trimEnd - trimStart)}
+                            </span>
+                            <span>{formatTime(trimEnd)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
