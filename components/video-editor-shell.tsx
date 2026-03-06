@@ -681,7 +681,10 @@ export function VideoEditorShell({
             <div className="space-y-2">
               <label className="text-xs text-[#9a968d]">Output format</label>
               <Select value={outputFormat} onValueChange={onOutputFormatChange}>
-                <SelectTrigger className="h-10 rounded-md border-[#353535] bg-[#101010] text-[#f3efe6]">
+                <SelectTrigger
+                  className="h-10 rounded-md border-[#353535] bg-[#101010] text-[#f3efe6]"
+                  disabled={isGifInput}
+                >
                   <SelectValue placeholder="Select format" />
                 </SelectTrigger>
                 <SelectContent className="border-[#353535] bg-[#101010] text-[#f3efe6]">
@@ -722,8 +725,8 @@ export function VideoEditorShell({
 
             {isGifInput && (
               <div className="border border-[#4b3720] bg-[#20170d] px-3 py-2 text-xs text-[#d8a86a]">
-                GIF input exports through browser decoding and records to video.
-                Timeline trim remains video-only.
+                GIF input exports through browser decoding and records to WebM
+                video for reliability. Timeline trim remains video-only.
               </div>
             )}
           </div>

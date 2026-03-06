@@ -298,6 +298,7 @@ export function VideoCompressor() {
 
     if (isGif) {
       setEncodeEngine("browser");
+      setOutputFormat("webm-vp9");
     }
 
     toast.success(`${isGif ? "GIF" : "Video"} selected`, {
@@ -551,16 +552,11 @@ export function VideoCompressor() {
       }
 
       stream = (canvas as any).captureStream(60);
-      const mimeCandidates =
-        outputFormat === "mp4-h264"
-          ? [
-              "video/mp4;codecs=avc1",
-              "video/mp4",
-              "video/webm;codecs=vp9",
-              "video/webm;codecs=vp8",
-              "video/webm",
-            ]
-          : ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+      const mimeCandidates = [
+        "video/webm;codecs=vp9",
+        "video/webm;codecs=vp8",
+        "video/webm",
+      ];
 
       const supportedMime = mimeCandidates.find((type) =>
         (window as any).MediaRecorder?.isTypeSupported?.(type)
@@ -568,6 +564,13 @@ export function VideoCompressor() {
 
       if (!supportedMime) {
         throw new Error("This browser cannot encode GIF exports.");
+      }
+
+      if (outputFormat !== "webm-vp9") {
+        setOutputFormat("webm-vp9");
+        toast.message("GIF export switched to WebM", {
+          description: "Browser GIF recording is more reliable with WebM output.",
+        });
       }
 
       const captureStream = stream;
