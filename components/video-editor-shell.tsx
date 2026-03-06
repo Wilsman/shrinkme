@@ -191,7 +191,11 @@ export function VideoEditorShell({
       return;
     }
 
-    if (Math.abs(exportVideo.currentTime - currentTime) > 0.2) {
+    if (
+      exportVideo.readyState >= 1 &&
+      Number.isFinite(exportVideo.duration) &&
+      Math.abs(exportVideo.currentTime - currentTime) > 0.2
+    ) {
       exportVideo.currentTime = currentTime;
     }
   }, [compressedVideo, currentTime, isGifInput]);
@@ -203,8 +207,15 @@ export function VideoEditorShell({
     }
 
     if (isPlaying) {
+      if (!exportVideo.currentSrc && !exportVideo.src) {
+        return;
+      }
+
       exportVideo.play().catch((error) => {
-        if (error?.name !== "AbortError") {
+        if (
+          error?.name !== "AbortError" &&
+          error?.name !== "NotSupportedError"
+        ) {
           console.error("Error playing exported video:", error);
         }
       });

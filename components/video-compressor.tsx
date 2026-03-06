@@ -96,23 +96,44 @@ export function VideoCompressor() {
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const generatingThumbsRef = useRef(false);
   const filmstripRef = useRef<HTMLDivElement>(null);
+  const sourceObjectUrlRef = useRef<string | null>(null);
+  const compressedObjectUrlRef = useRef<string | null>(null);
   const isGifInput = originalVideo?.type === "image/gif";
   const uploadAccept = "video/*,image/gif";
+
+  const replaceVideoObjectUrl = (nextUrl: string | null) => {
+    const previousUrl = sourceObjectUrlRef.current;
+    if (previousUrl && previousUrl !== nextUrl) {
+      URL.revokeObjectURL(previousUrl);
+    }
+
+    sourceObjectUrlRef.current = nextUrl;
+    setVideoObjectUrl(nextUrl);
+  };
+
+  const replaceCompressedVideoUrl = (nextUrl: string | null) => {
+    const previousUrl = compressedObjectUrlRef.current;
+    if (previousUrl && previousUrl !== nextUrl) {
+      URL.revokeObjectURL(previousUrl);
+    }
+
+    compressedObjectUrlRef.current = nextUrl;
+    setCompressedVideo(nextUrl);
+  };
 
   useEffect(() => {
     // Set ready state immediately since we're using browser APIs
     setIsReady(true);
 
-    // Cleanup function to revoke object URLs when component unmounts
     return () => {
-      if (videoObjectUrl) {
-        URL.revokeObjectURL(videoObjectUrl);
+      if (sourceObjectUrlRef.current) {
+        URL.revokeObjectURL(sourceObjectUrlRef.current);
       }
-      if (compressedVideo) {
-        URL.revokeObjectURL(compressedVideo);
+      if (compressedObjectUrlRef.current) {
+        URL.revokeObjectURL(compressedObjectUrlRef.current);
       }
     };
-  }, [videoObjectUrl, compressedVideo]);
+  }, []);
 
   // Generate filmstrip thumbnails when a new video is loaded
   useEffect(() => {
@@ -199,7 +220,7 @@ export function VideoCompressor() {
   // Control video playback based on isPlaying state
   useEffect(() => {
     const videoElement = videoPreviewRef.current;
-    if (!videoElement) return;
+    if (!videoElement || !videoObjectUrl) return;
 
     if (isPlaying) {
       // If at the end of trim range, go back to start
@@ -208,7 +229,11 @@ export function VideoCompressor() {
       }
 
       videoElement.play().catch((err) => {
-        if (err?.name === "AbortError") {
+        if (
+          err?.name === "AbortError" ||
+          err?.name === "NotSupportedError"
+        ) {
+          setIsPlaying(false);
           return;
         }
         console.error("Error playing video:", err);
@@ -217,7 +242,7 @@ export function VideoCompressor() {
     } else {
       videoElement.pause();
     }
-  }, [isPlaying, trimStart, trimEnd]);
+  }, [isPlaying, trimStart, trimEnd, videoObjectUrl]);
 
   // Pause video when compression starts
   useEffect(() => {
@@ -253,15 +278,11 @@ export function VideoCompressor() {
       return;
     }
 
-    if (videoObjectUrl) {
-      URL.revokeObjectURL(videoObjectUrl);
-    }
-
     const objectUrl = URL.createObjectURL(file);
-    setVideoObjectUrl(objectUrl);
+    replaceVideoObjectUrl(objectUrl);
     setOriginalVideo(file);
     setOriginalSize(file.size);
-    setCompressedVideo(null);
+    replaceCompressedVideoUrl(null);
     setCompressedSize(null);
     setError(null);
     setThumbnails([]);
@@ -273,6 +294,7 @@ export function VideoCompressor() {
     setVideoDuration(0);
     setIsPlaying(false);
     setIsDraggingFile(false);
+    setRecordedMimeType(null);
 
     if (isGif) {
       setEncodeEngine("mediabunny");
@@ -449,7 +471,7 @@ export function VideoCompressor() {
 
     setIsCompressing(true);
     setError(null);
-    setCompressedVideo(null);
+    replaceCompressedVideoUrl(null);
     setCompressedSize(null);
     setProgress(0);
     // Ensure preview playback is stopped while compressing
@@ -728,7 +750,7 @@ export function VideoCompressor() {
           );
         }
 
-        setCompressedVideo(compressedUrl);
+        replaceCompressedVideoUrl(compressedUrl);
         setCompressedSize(finalSize);
         setIsCompressing(false);
 
@@ -830,18 +852,10 @@ export function VideoCompressor() {
 
   // Reset everything to start over with a new media file
   const resetCompressor = () => {
-    // Revoke object URLs to free memory
-    if (videoObjectUrl) {
-      URL.revokeObjectURL(videoObjectUrl);
-    }
-    if (compressedVideo) {
-      URL.revokeObjectURL(compressedVideo);
-    }
-
     // Reset all state
     setOriginalVideo(null);
-    setVideoObjectUrl(null);
-    setCompressedVideo(null);
+    replaceVideoObjectUrl(null);
+    replaceCompressedVideoUrl(null);
     setCompressedSize(null);
     setOriginalSize(null);
     setError(null);
@@ -867,7 +881,7 @@ export function VideoCompressor() {
 
     setIsCompressing(true);
     setError(null);
-    setCompressedVideo(null);
+    replaceCompressedVideoUrl(null);
     setCompressedSize(null);
     setProgress(0);
     setCompressionAttempt(0);
@@ -1076,7 +1090,7 @@ export function VideoCompressor() {
 
       // Apply the best result
       if (bestResult) {
-        setCompressedVideo(bestResult.url);
+        replaceCompressedVideoUrl(bestResult.url);
         setCompressedSize(bestResult.blob.size);
         setRecordedMimeType(
           outputFormat === "mp4-h264" ? "video/mp4" : "video/webm"
