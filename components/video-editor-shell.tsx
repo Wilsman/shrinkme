@@ -1,9 +1,9 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -164,6 +164,55 @@ export function VideoEditorShell({
     videoDuration > 0
       ? Array.from({ length: 9 }, (_, index) => (videoDuration / 8) * index)
       : [];
+  const compareExportVideoRef = useRef<HTMLVideoElement | null>(null);
+  const [CompareSlider, setCompareSlider] = useState<React.ComponentType<any> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+
+    import("react-compare-slider")
+      .then((module) => {
+        if (active) {
+          setCompareSlider(() => module.ReactCompareSlider);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load compare slider:", error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const exportVideo = compareExportVideoRef.current;
+    if (!compressedVideo || !exportVideo || isGifInput) {
+      return;
+    }
+
+    if (Math.abs(exportVideo.currentTime - currentTime) > 0.2) {
+      exportVideo.currentTime = currentTime;
+    }
+  }, [compressedVideo, currentTime, isGifInput]);
+
+  useEffect(() => {
+    const exportVideo = compareExportVideoRef.current;
+    if (!compressedVideo || !exportVideo || isGifInput) {
+      return;
+    }
+
+    if (isPlaying) {
+      exportVideo.play().catch((error) => {
+        if (error?.name !== "AbortError") {
+          console.error("Error playing exported video:", error);
+        }
+      });
+      return;
+    }
+
+    exportVideo.pause();
+  }, [compressedVideo, isGifInput, isPlaying]);
 
   const renderLivePreview = () => (
     <div className="flex h-full min-h-0 flex-col">
@@ -306,55 +355,102 @@ export function VideoEditorShell({
   const renderPreviewPanel = () => (
     <section className="flex h-full min-h-0 flex-col bg-[#171717]">
       {compressedVideo ? (
-        <Tabs defaultValue="original" className="flex h-full min-h-0 flex-col">
-          <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4">
-            <div className="py-3">
-              <div className="text-sm font-medium text-[#f3efe6]">Preview</div>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4 py-3">
+            <div>
+              <div className="text-sm font-medium text-[#f3efe6]">Compare export</div>
               <div className="text-xs text-[#9a968d]">
-                Compare the live edit against the exported result.
+                Drag the divider to inspect the original clip against the exported result.
               </div>
             </div>
-            <TabsList className="h-auto rounded-none border border-[#2a2a2a] bg-transparent p-0">
-              <TabsTrigger
-                value="original"
-                className="rounded-none border-r border-[#2a2a2a] px-3 py-2 text-xs text-[#9a968d] data-[state=active]:bg-[#1d1d1d] data-[state=active]:text-[#f3efe6]"
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onTogglePlayPause}
+                className="h-8 rounded-full border-[#3a3a3a] bg-[#171717] px-3 text-xs text-[#f3efe6] hover:bg-[#1f1f1f]"
+                title={isPlaying ? "Pause compare preview" : "Play compare preview"}
               >
-                Original
-              </TabsTrigger>
-              <TabsTrigger
-                value="compressed"
-                className="rounded-none px-3 py-2 text-xs text-[#9a968d] data-[state=active]:bg-[#1d1d1d] data-[state=active]:text-[#f3efe6]"
-              >
-                Export
-              </TabsTrigger>
-            </TabsList>
+                {isPlaying ? (
+                  <Pause className="mr-2 h-3.5 w-3.5" />
+                ) : (
+                  <Play className="mr-2 h-3.5 w-3.5" />
+                )}
+                {isPlaying ? "Pause" : "Play"}
+              </Button>
+              <div className="flex items-center gap-3 text-xs text-[#9a968d]">
+                <span>Original</span>
+                <span className="h-px w-6 bg-[#3a3a3a]" />
+                <span>Export</span>
+              </div>
+            </div>
           </div>
-          <TabsContent value="original" className="mt-0 flex-1 min-h-0">
-            {renderLivePreview()}
-          </TabsContent>
-          <TabsContent value="compressed" className="mt-0 flex-1 min-h-0">
-            <div className="flex h-full min-h-0 flex-col">
-              <div className="border-b border-[#2a2a2a] px-4 py-3">
-                <div className="text-sm font-medium text-[#f3efe6]">
-                  Export preview
-                </div>
-                <div className="text-xs text-[#9a968d]">
-                  Final output ready for download.
+
+          <div className="min-h-0 flex-1 p-4">
+            <div className="flex h-full min-h-0 flex-col border border-[#2a2a2a] bg-[#101010]">
+              <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                <div className="relative h-full w-full border border-[#252525] bg-[#0b0b0b]">
+                  {CompareSlider ? (
+                    <CompareSlider
+                      className="h-full w-full"
+                      boundsPadding={0}
+                      itemOne={
+                        isGifInput ? (
+                          <img
+                            src={videoObjectUrl || ""}
+                            alt="Original source"
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <video
+                            ref={videoPreviewRef}
+                            src={videoObjectUrl || ""}
+                            className="h-full w-full object-contain"
+                            playsInline
+                            muted
+                            onClick={onTogglePlayPause}
+                            onTimeUpdate={onVideoTimeUpdate}
+                          />
+                        )
+                      }
+                      itemTwo={
+                        <video
+                          ref={compareExportVideoRef}
+                          src={compressedVideo}
+                          className="h-full w-full object-contain"
+                          playsInline
+                          muted
+                          onClick={onTogglePlayPause}
+                        />
+                      }
+                      handle={
+                        <div className="flex h-full w-8 items-center justify-center">
+                          <div className="flex h-12 w-8 items-center justify-center border border-[#d0a15c] bg-[#171717] text-[#d0a15c]">
+                            <div className="flex gap-1">
+                              <span className="block h-4 w-px bg-current" />
+                              <span className="block h-4 w-px bg-current" />
+                            </div>
+                          </div>
+                        </div>
+                      }
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-sm text-[#9a968d]">
+                      Loading compare viewer
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="min-h-0 flex-1 p-4">
-                <div className="flex h-full items-center justify-center border border-[#2a2a2a] bg-[#101010] p-4">
-                  <video
-                    src={compressedVideo}
-                    controls
-                    className="max-h-full max-w-full object-contain"
-                    playsInline
-                  />
+
+              <div className="grid grid-cols-2 border-t border-[#2a2a2a] bg-[#121212] text-xs text-[#9a968d]">
+                <div className="border-r border-[#2a2a2a] px-4 py-2">
+                  Original source
                 </div>
+                <div className="px-4 py-2 text-right">Compressed export</div>
               </div>
             </div>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       ) : (
         renderLivePreview()
       )}
