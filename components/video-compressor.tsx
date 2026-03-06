@@ -850,6 +850,24 @@ export function VideoCompressor() {
     document.body.removeChild(a);
   };
 
+  const clearCompressedPreview = () => {
+    const nextTime = isGifInput ? 0 : trimStart;
+
+    setIsPlaying(false);
+    replaceCompressedVideoUrl(null);
+    setCompressedSize(null);
+    setRecordedMimeType(null);
+    setProgress(0);
+    setCompressionAttempt(0);
+    setCurrentQualityLevel("");
+    setError(null);
+
+    if (videoPreviewRef.current && !isGifInput) {
+      videoPreviewRef.current.currentTime = nextTime;
+    }
+    setCurrentTime(nextTime);
+  };
+
   // Reset everything to start over with a new media file
   const resetCompressor = () => {
     // Reset all state
@@ -1169,6 +1187,7 @@ export function VideoCompressor() {
           videoObjectUrl={videoObjectUrl}
           videoPreviewRef={videoPreviewRef}
           onCompress={compressVideo}
+          onClearExport={clearCompressedPreview}
           onDownload={downloadCompressedVideo}
           onEncodeEngineChange={setEncodeEngine}
           onFrameStep={handleFrameStep}

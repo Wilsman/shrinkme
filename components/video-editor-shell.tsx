@@ -92,6 +92,7 @@ type VideoEditorShellProps = {
   onEncodeEngineChange: (value: "browser" | "mediabunny") => void;
   onFrameStep: (forward: boolean) => void;
   onOutputFormatChange: (value: string) => void;
+  onClearExport: () => void;
   onReplaceSource: () => void;
   onResetCompressor: () => void;
   onResetTrim: () => void;
@@ -143,6 +144,7 @@ export function VideoEditorShell({
   onEncodeEngineChange,
   onFrameStep,
   onOutputFormatChange,
+  onClearExport,
   onReplaceSource,
   onResetCompressor,
   onResetTrim,
@@ -160,6 +162,10 @@ export function VideoEditorShell({
   const trimEndPercent = Math.min(100, trimStartPercent + trimWidthPercent);
   const playheadPercent =
     videoDuration > 0 ? (playheadTime / videoDuration) * 100 : 0;
+  const comparePlaybackTime = Math.max(
+    0,
+    Math.min(selectionDuration, currentTime - trimStart)
+  );
   const rulerTicks =
     videoDuration > 0
       ? Array.from({ length: 9 }, (_, index) => (videoDuration / 8) * index)
@@ -191,14 +197,42 @@ export function VideoEditorShell({
       return;
     }
 
-    if (
-      exportVideo.readyState >= 1 &&
-      Number.isFinite(exportVideo.duration) &&
-      Math.abs(exportVideo.currentTime - currentTime) > 0.2
-    ) {
-      exportVideo.currentTime = currentTime;
-    }
-  }, [compressedVideo, currentTime, isGifInput]);
+    const syncPlaybackState = () => {
+      if (
+        isPlaying &&
+        exportVideo.paused &&
+        (exportVideo.currentSrc || exportVideo.src)
+      ) {
+        exportVideo.play().catch((error) => {
+          if (
+            error?.name !== "AbortError" &&
+            error?.name !== "NotSupportedError"
+          ) {
+            console.error("Error playing exported video:", error);
+          }
+        });
+      }
+    };
+
+    const syncExportTime = () => {
+      if (
+        exportVideo.readyState >= 1 &&
+        Number.isFinite(exportVideo.duration) &&
+        Math.abs(exportVideo.currentTime - comparePlaybackTime) > 0.2
+      ) {
+        exportVideo.currentTime = comparePlaybackTime;
+      }
+
+      syncPlaybackState();
+    };
+
+    syncExportTime();
+    exportVideo.addEventListener("loadedmetadata", syncExportTime);
+
+    return () => {
+      exportVideo.removeEventListener("loadedmetadata", syncExportTime);
+    };
+  }, [comparePlaybackTime, compressedVideo, isGifInput, isPlaying]);
 
   useEffect(() => {
     const exportVideo = compareExportVideoRef.current;
@@ -375,6 +409,16 @@ export function VideoEditorShell({
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={onClearExport}
+                className="h-8 rounded-full px-3 text-xs text-[#c4beb4] hover:bg-[#1f1f1f] hover:text-[#f3efe6]"
+                title="Return to editing"
+              >
+                <RotateCcw className="mr-2 h-3.5 w-3.5" />
+                Back to edit
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
