@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type React from "react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -92,7 +92,6 @@ type VideoEditorShellProps = {
   onEncodeEngineChange: (value: "browser" | "mediabunny") => void;
   onFrameStep: (forward: boolean) => void;
   onOutputFormatChange: (value: string) => void;
-  onClearExport: () => void;
   onReplaceSource: () => void;
   onResetCompressor: () => void;
   onResetTrim: () => void;
@@ -144,7 +143,6 @@ export function VideoEditorShell({
   onEncodeEngineChange,
   onFrameStep,
   onOutputFormatChange,
-  onClearExport,
   onReplaceSource,
   onResetCompressor,
   onResetTrim,
@@ -162,102 +160,17 @@ export function VideoEditorShell({
   const trimEndPercent = Math.min(100, trimStartPercent + trimWidthPercent);
   const playheadPercent =
     videoDuration > 0 ? (playheadTime / videoDuration) * 100 : 0;
-  const comparePlaybackTime = Math.max(
-    0,
-    Math.min(selectionDuration, currentTime - trimStart)
-  );
   const rulerTicks =
     videoDuration > 0
       ? Array.from({ length: 9 }, (_, index) => (videoDuration / 8) * index)
       : [];
-  const compareExportVideoRef = useRef<HTMLVideoElement | null>(null);
-  const [CompareSlider, setCompareSlider] = useState<React.ComponentType<any> | null>(null);
+  const [previewMode, setPreviewMode] = useState<"original" | "export">(
+    compressedVideo ? "export" : "original"
+  );
 
   useEffect(() => {
-    let active = true;
-
-    import("react-compare-slider")
-      .then((module) => {
-        if (active) {
-          setCompareSlider(() => module.ReactCompareSlider);
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load compare slider:", error);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    const exportVideo = compareExportVideoRef.current;
-    if (!compressedVideo || !exportVideo || isGifInput) {
-      return;
-    }
-
-    const syncPlaybackState = () => {
-      if (
-        isPlaying &&
-        exportVideo.paused &&
-        (exportVideo.currentSrc || exportVideo.src)
-      ) {
-        exportVideo.play().catch((error) => {
-          if (
-            error?.name !== "AbortError" &&
-            error?.name !== "NotSupportedError"
-          ) {
-            console.error("Error playing exported video:", error);
-          }
-        });
-      }
-    };
-
-    const syncExportTime = () => {
-      if (
-        exportVideo.readyState >= 1 &&
-        Number.isFinite(exportVideo.duration) &&
-        Math.abs(exportVideo.currentTime - comparePlaybackTime) > 0.2
-      ) {
-        exportVideo.currentTime = comparePlaybackTime;
-      }
-
-      syncPlaybackState();
-    };
-
-    syncExportTime();
-    exportVideo.addEventListener("loadedmetadata", syncExportTime);
-
-    return () => {
-      exportVideo.removeEventListener("loadedmetadata", syncExportTime);
-    };
-  }, [comparePlaybackTime, compressedVideo, isGifInput, isPlaying]);
-
-  useEffect(() => {
-    const exportVideo = compareExportVideoRef.current;
-    if (!compressedVideo || !exportVideo || isGifInput) {
-      return;
-    }
-
-    if (isPlaying) {
-      if (!exportVideo.currentSrc && !exportVideo.src) {
-        return;
-      }
-
-      exportVideo.play().catch((error) => {
-        if (
-          error?.name !== "AbortError" &&
-          error?.name !== "NotSupportedError"
-        ) {
-          console.error("Error playing exported video:", error);
-        }
-      });
-      return;
-    }
-
-    exportVideo.pause();
-  }, [compressedVideo, isGifInput, isPlaying]);
+    setPreviewMode(compressedVideo ? "export" : "original");
+  }, [compressedVideo]);
 
   const renderLivePreview = () => (
     <div className="flex h-full min-h-0 flex-col">
@@ -403,40 +316,39 @@ export function VideoEditorShell({
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex items-center justify-between border-b border-[#2a2a2a] px-4 py-3">
             <div>
-              <div className="text-sm font-medium text-[#f3efe6]">Compare export</div>
+              <div className="text-sm font-medium text-[#f3efe6]">Preview</div>
               <div className="text-xs text-[#9a968d]">
-                Drag the divider to inspect the original clip against the exported result.
+                Review the exported clip or switch back to the source to keep trimming.
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={onClearExport}
-                className="h-8 rounded-full px-3 text-xs text-[#c4beb4] hover:bg-[#1f1f1f] hover:text-[#f3efe6]"
-                title="Return to editing"
-              >
-                <RotateCcw className="mr-2 h-3.5 w-3.5" />
-                Back to edit
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onTogglePlayPause}
-                className="h-8 rounded-full border-[#3a3a3a] bg-[#171717] px-3 text-xs text-[#f3efe6] hover:bg-[#1f1f1f]"
-                title={isPlaying ? "Pause compare preview" : "Play compare preview"}
-              >
-                {isPlaying ? (
-                  <Pause className="mr-2 h-3.5 w-3.5" />
-                ) : (
-                  <Play className="mr-2 h-3.5 w-3.5" />
-                )}
-                {isPlaying ? "Pause" : "Play"}
-              </Button>
-              <div className="flex items-center gap-3 text-xs text-[#9a968d]">
-                <span>Original</span>
-                <span className="h-px w-6 bg-[#3a3a3a]" />
-                <span>Export</span>
+              <div className="flex overflow-hidden rounded-full border border-[#3a3a3a] bg-[#111111] p-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPreviewMode("original")}
+                  className={cn(
+                    "h-7 rounded-full px-3 text-xs",
+                    previewMode === "original"
+                      ? "bg-[#d0a15c] text-[#111111] hover:bg-[#ddb170]"
+                      : "text-[#c4beb4] hover:bg-[#1f1f1f] hover:text-[#f3efe6]"
+                  )}
+                >
+                  Source
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setPreviewMode("export")}
+                  className={cn(
+                    "h-7 rounded-full px-3 text-xs",
+                    previewMode === "export"
+                      ? "bg-[#d0a15c] text-[#111111] hover:bg-[#ddb170]"
+                      : "text-[#c4beb4] hover:bg-[#1f1f1f] hover:text-[#f3efe6]"
+                  )}
+                >
+                  Export
+                </Button>
               </div>
             </div>
           </div>
@@ -444,65 +356,132 @@ export function VideoEditorShell({
           <div className="min-h-0 flex-1 p-4">
             <div className="flex h-full min-h-0 flex-col border border-[#2a2a2a] bg-[#101010]">
               <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-                <div className="relative h-full w-full border border-[#252525] bg-[#0b0b0b]">
-                  {CompareSlider ? (
-                    <CompareSlider
-                      className="h-full w-full"
-                      boundsPadding={0}
-                      itemOne={
-                        isGifInput ? (
-                          <img
-                            src={videoObjectUrl || ""}
-                            alt="Original source"
-                            className="h-full w-full object-contain"
-                          />
-                        ) : (
-                          <video
-                            ref={videoPreviewRef}
-                            src={videoObjectUrl || ""}
-                            className="h-full w-full object-contain"
-                            playsInline
-                            muted
-                            onClick={onTogglePlayPause}
-                            onTimeUpdate={onVideoTimeUpdate}
-                          />
-                        )
-                      }
-                      itemTwo={
-                        <video
-                          ref={compareExportVideoRef}
-                          src={compressedVideo}
-                          className="h-full w-full object-contain"
-                          playsInline
-                          muted
-                          onClick={onTogglePlayPause}
-                        />
-                      }
-                      handle={
-                        <div className="flex h-full w-8 items-center justify-center">
-                          <div className="flex h-12 w-8 items-center justify-center border border-[#d0a15c] bg-[#171717] text-[#d0a15c]">
-                            <div className="flex gap-1">
-                              <span className="block h-4 w-px bg-current" />
-                              <span className="block h-4 w-px bg-current" />
-                            </div>
-                          </div>
-                        </div>
-                      }
+                <div className="relative flex h-full w-full items-center justify-center border border-[#252525] bg-[#0b0b0b]">
+                  {previewMode === "export" ? (
+                    <video
+                      src={compressedVideo}
+                      controls
+                      className="max-h-full max-w-full object-contain"
+                      playsInline
+                    />
+                  ) : isGifInput ? (
+                    <img
+                      src={videoObjectUrl || ""}
+                      alt="GIF preview"
+                      className="max-h-full max-w-full object-contain"
                     />
                   ) : (
-                    <div className="flex h-full items-center justify-center text-sm text-[#9a968d]">
-                      Loading compare viewer
-                    </div>
+                    <>
+                      <video
+                        ref={videoPreviewRef}
+                        src={videoObjectUrl || ""}
+                        className="max-h-full max-w-full object-contain"
+                        playsInline
+                        onClick={onTogglePlayPause}
+                        onTimeUpdate={onVideoTimeUpdate}
+                      />
+                      {!isPlaying && (
+                        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                          <div className="flex h-14 w-14 items-center justify-center border border-white/10 bg-black/60 text-white">
+                            <Play className="ml-0.5 h-5 w-5" />
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 border-t border-[#2a2a2a] bg-[#121212] text-xs text-[#9a968d]">
-                <div className="border-r border-[#2a2a2a] px-4 py-2">
-                  Original source
+              {previewMode === "original" && !isGifInput ? (
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a2a2a] px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() => onFrameStep(false)}
+                      className="h-9 w-9 rounded-md border-[#353535] bg-[#171717] text-[#f3efe6] hover:bg-[#1f1f1f]"
+                      title="Previous frame"
+                    >
+                      <SkipBack className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      onClick={onTogglePlayPause}
+                      className="h-9 w-9 rounded-md bg-[#d0a15c] text-[#111111] hover:bg-[#ddb170]"
+                      title={isPlaying ? "Pause" : "Play"}
+                    >
+                      {isPlaying ? (
+                        <Pause className="h-4 w-4" />
+                      ) : (
+                        <Play className="ml-0.5 h-4 w-4" />
+                      )}
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      onClick={() => onFrameStep(true)}
+                      className="h-9 w-9 rounded-md border-[#353535] bg-[#171717] text-[#f3efe6] hover:bg-[#1f1f1f]"
+                      title="Next frame"
+                    >
+                      <SkipForward className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={onToggleLoop}
+                      className={cn(
+                        "h-9 w-9 rounded-md text-[#c4beb4] hover:bg-[#1f1f1f]",
+                        isLooping && "bg-[#221b12] text-[#d0a15c]"
+                      )}
+                      title={isLooping ? "Looping enabled" : "Looping disabled"}
+                    >
+                      <Repeat className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={onResetTrim}
+                      className="h-9 rounded-md px-3 text-[#c4beb4] hover:bg-[#1f1f1f] hover:text-[#f3efe6]"
+                    >
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Reset trim
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 text-right text-xs text-[#9a968d]">
+                    <div>
+                      <div>Playhead</div>
+                      <div className="font-mono text-[#f3efe6]">
+                        {formatTime(currentTime)}
+                      </div>
+                    </div>
+                    <div>
+                      <div>Selection</div>
+                      <div className="font-mono text-[#f3efe6]">
+                        {formatTime(selectionDuration)}
+                      </div>
+                    </div>
+                    <div>
+                      <div>Duration</div>
+                      <div className="font-mono text-[#f3efe6]">
+                        {formatTime(videoDuration)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="px-4 py-2 text-right">Compressed export</div>
-              </div>
+              ) : (
+                <div className="flex items-center justify-between border-t border-[#2a2a2a] bg-[#121212] px-4 py-3 text-xs text-[#9a968d]">
+                  <span>
+                    {previewMode === "export"
+                      ? "Previewing the latest exported file."
+                      : "GIF source preview"}
+                  </span>
+                  {previewMode === "export" && compressedSize ? (
+                    <span className="font-mono text-[#f3efe6]">
+                      {formatFileSize(compressedSize)}
+                    </span>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1073,18 +1052,16 @@ export function VideoEditorShell({
             Replace
           </Button>
           <Button
-            onClick={compressedVideo ? onDownload : onCompress}
+            onClick={onCompress}
             disabled={isCompressing}
             className="rounded-md bg-[#d0a15c] text-[#111111] hover:bg-[#ddb170]"
           >
             {isCompressing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : compressedVideo ? (
-              <Download className="mr-2 h-4 w-4" />
             ) : (
               <Scissors className="mr-2 h-4 w-4" />
             )}
-            {compressedVideo ? "Download export" : "Export"}
+            {compressedVideo ? "Render new export" : "Export"}
           </Button>
         </div>
       </header>
