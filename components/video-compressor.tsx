@@ -297,7 +297,7 @@ export function VideoCompressor() {
     setRecordedMimeType(null);
 
     if (isGif) {
-      setEncodeEngine("mediabunny");
+      setEncodeEngine("browser");
     }
 
     toast.success(`${isGif ? "GIF" : "Video"} selected`, {
@@ -440,6 +440,219 @@ export function VideoCompressor() {
     handleSeek(0);
   };
 
+  const compressGifWithBrowser = async () => {
+    if (!originalVideo) return;
+
+    setIsCompressing(true);
+    setError(null);
+    replaceCompressedVideoUrl(null);
+    setCompressedSize(null);
+    setProgress(0);
+    setCompressionAttempt(0);
+    setCurrentQualityLevel("");
+    setIsPlaying(false);
+
+    toast.loading("Converting…", {
+      id: "compress",
+      description: "Decoding GIF frames",
+      duration: Infinity,
+    });
+
+    let decoder: any = null;
+    let stream: MediaStream | null = null;
+
+    try {
+      const ImageDecoderCtor = (window as any).ImageDecoder;
+      const supportsGifDecoding =
+        typeof ImageDecoderCtor?.isTypeSupported === "function" &&
+        (await ImageDecoderCtor.isTypeSupported("image/gif"));
+
+      if (!ImageDecoderCtor || !supportsGifDecoding) {
+        throw new Error(
+          "This browser cannot decode GIF files for export. Try Chrome or Edge."
+        );
+      }
+
+      decoder = new ImageDecoderCtor({
+        data: await originalVideo.arrayBuffer(),
+        type: "image/gif",
+      });
+      await decoder.completed;
+
+      const track = decoder.tracks?.selectedTrack;
+      const frameCount = Math.max(1, track?.frameCount ?? 1);
+      const firstFrame = await decoder.decode({ frameIndex: 0 });
+      const firstImage = firstFrame.image as any;
+      const sourceWidth = Math.max(
+        2,
+        firstImage.displayWidth || firstImage.codedWidth || 2
+      );
+      const sourceHeight = Math.max(
+        2,
+        firstImage.displayHeight || firstImage.codedHeight || 2
+      );
+      const getFrameDurationMs = (frame: any) =>
+        Math.max(20, Math.round((frame?.duration ?? 100_000) / 1000));
+
+      let totalDurationMs = getFrameDurationMs(firstImage);
+      firstImage.close?.();
+
+      for (let frameIndex = 1; frameIndex < frameCount; frameIndex += 1) {
+        const decodedFrame = await decoder.decode({ frameIndex });
+        totalDurationMs += getFrameDurationMs(decodedFrame.image);
+        decodedFrame.image.close?.();
+        setProgress(Math.max(5, Math.round((frameIndex / frameCount) * 20)));
+      }
+
+      const durationSeconds = Math.max(0.1, totalDurationMs / 1000);
+      const targetBytes = targetSizeMB * 1024 * 1024;
+      const targetBits = targetBytes * 8 * 0.93;
+      const targetVideoBitrate = Math.floor(targetBits / durationSeconds);
+      const videoBitsPerSecond = Math.max(
+        250_000,
+        Math.min(targetVideoBitrate, 5_000_000)
+      );
+
+      let scaleFactor = 1;
+      if (originalVideo.size > targetBytes * 4) {
+        scaleFactor = 0.55;
+      } else if (originalVideo.size > targetBytes * 2) {
+        scaleFactor = 0.7;
+      } else if (originalVideo.size > targetBytes) {
+        scaleFactor = 0.85;
+      }
+
+      let targetWidth = Math.max(2, Math.floor(sourceWidth * scaleFactor));
+      let targetHeight = Math.max(2, Math.floor(sourceHeight * scaleFactor));
+      targetWidth -= targetWidth % 2;
+      targetHeight -= targetHeight % 2;
+
+      const MAX_DIMENSION = 1280;
+      if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
+        if (targetWidth >= targetHeight) {
+          const ratio = MAX_DIMENSION / targetWidth;
+          targetWidth = MAX_DIMENSION;
+          targetHeight = Math.max(2, Math.floor(targetHeight * ratio));
+        } else {
+          const ratio = MAX_DIMENSION / targetHeight;
+          targetHeight = MAX_DIMENSION;
+          targetWidth = Math.max(2, Math.floor(targetWidth * ratio));
+        }
+        targetWidth -= targetWidth % 2;
+        targetHeight -= targetHeight % 2;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext("2d", { alpha: true });
+      if (!ctx) {
+        throw new Error("Could not create a canvas context for GIF export.");
+      }
+
+      stream = (canvas as any).captureStream(60);
+      const mimeCandidates =
+        outputFormat === "mp4-h264"
+          ? [
+              "video/mp4;codecs=avc1",
+              "video/mp4",
+              "video/webm;codecs=vp9",
+              "video/webm;codecs=vp8",
+              "video/webm",
+            ]
+          : ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+
+      const supportedMime = mimeCandidates.find((type) =>
+        (window as any).MediaRecorder?.isTypeSupported?.(type)
+      );
+
+      if (!supportedMime) {
+        throw new Error("This browser cannot encode GIF exports.");
+      }
+
+      const captureStream = stream;
+      if (!captureStream) {
+        throw new Error("Could not create a capture stream for GIF export.");
+      }
+
+      const mediaRecorder = new MediaRecorder(captureStream, {
+        mimeType: supportedMime,
+        videoBitsPerSecond,
+      });
+      const chunks: Blob[] = [];
+      const finaliseExport = new Promise<void>((resolve, reject) => {
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onerror = () => {
+          reject(new Error("GIF recording failed."));
+        };
+
+        mediaRecorder.onstop = () => {
+          const actualType =
+            mediaRecorder.mimeType || chunks[0]?.type || "video/webm";
+          const blob = new Blob(chunks, { type: actualType });
+          const compressedUrl = URL.createObjectURL(blob);
+
+          replaceCompressedVideoUrl(compressedUrl);
+          setCompressedSize(blob.size);
+          setRecordedMimeType(actualType);
+          setProgress(100);
+
+          const reduction = Math.round(
+            (1 - blob.size / Math.max(1, originalVideo.size)) * 100
+          );
+          toast.success("GIF export complete", {
+            id: "compress",
+            description: `${formatFileSize(blob.size)} • ${reduction}% smaller`,
+          });
+
+          resolve();
+        };
+      });
+
+      mediaRecorder.start(250);
+
+      for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+        const decodedFrame = await decoder.decode({ frameIndex });
+        const frame = decodedFrame.image as any;
+        const durationMs = getFrameDurationMs(frame);
+
+        ctx.clearRect(0, 0, targetWidth, targetHeight);
+        ctx.drawImage(frame, 0, 0, targetWidth, targetHeight);
+        frame.close?.();
+
+        setProgress(Math.max(20, Math.round(((frameIndex + 1) / frameCount) * 100)));
+        toast.loading("Converting…", {
+          id: "compress",
+          description: `Encoding GIF frames • ${Math.round(
+            ((frameIndex + 1) / frameCount) * 100
+          )}%`,
+          duration: Infinity,
+        });
+
+        await new Promise((resolve) => window.setTimeout(resolve, durationMs));
+      }
+
+      mediaRecorder.stop();
+      await finaliseExport;
+    } catch (error: any) {
+      console.error("GIF conversion failed", error);
+      setError(error?.message || "GIF conversion failed");
+      toast.error("GIF conversion failed", {
+        id: "compress",
+        description: error?.message || String(error),
+      });
+    } finally {
+      stream?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+      decoder?.close?.();
+      setIsCompressing(false);
+    }
+  };
+
   // Compress the video using MediaRecorder
   const compressVideo = async () => {
     if (!originalVideo) {
@@ -448,13 +661,13 @@ export function VideoCompressor() {
     }
 
     if (isGifInput) {
-      if (encodeEngine !== "mediabunny") {
-        setEncodeEngine("mediabunny");
-        toast.message("GIF input uses Mediabunny", {
-          description: "Browser recording is only available for video sources.",
+      if (encodeEngine !== "browser") {
+        setEncodeEngine("browser");
+        toast.message("GIF input uses browser decoding", {
+          description: "Animated GIF export uses WebCodecs and MediaRecorder.",
         });
       }
-      await compressWithMediabunny();
+      await compressGifWithBrowser();
       return;
     }
 

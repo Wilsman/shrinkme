@@ -225,8 +225,8 @@ export function VideoEditorShell({
 
           {isGifInput ? (
             <div className="border-t border-[#2a2a2a] px-4 py-3 text-sm text-[#9a968d]">
-              GIF sources use the Mediabunny export path. Timeline trimming and
-              frame stepping stay available for video sources.
+              GIF sources export through browser decoding and recording. Timeline
+              trimming and frame stepping stay available for video sources.
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a2a2a] px-4 py-3">
@@ -722,8 +722,8 @@ export function VideoEditorShell({
 
             {isGifInput && (
               <div className="border border-[#4b3720] bg-[#20170d] px-3 py-2 text-xs text-[#d8a86a]">
-                GIF input always exports through Mediabunny. Browser recorder and
-                timeline trim remain video-only.
+                GIF input exports through browser decoding and records to video.
+                Timeline trim remains video-only.
               </div>
             )}
           </div>
