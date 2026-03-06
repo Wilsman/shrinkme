@@ -1,12 +1,14 @@
 import type React from "react";
 import "@/app/globals.css";
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { IBM_Plex_Sans } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Toaster } from "@/components/ui/sonner";
 
-const inter = Inter({ subsets: ["latin"] });
+const ibmPlexSans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+});
 
 export const metadata: Metadata = {
   title: "Video Compressor",
@@ -21,7 +23,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+      <body className={ibmPlexSans.className}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -31,43 +33,7 @@ export default function RootLayout({
           {children}
           <Toaster position="top-center" richColors closeButton />
         </ThemeProvider>
-        <script
-          data-name="BMC-Widget"
-          data-cfasync="false"
-          src="https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js"
-          data-id="wilsman77"
-          data-description="Support me on Buy me a coffee!"
-          data-message=""
-          data-color="#5F7FFF"
-          data-position="Right"
-          data-x_margin="50"
-          data-y_margin="50"
-        ></script>
       </body>
     </html>
   );
 }
-
-export function VersionLabel() {
-  return (
-    <footer className="fixed bottom-0 left-0 w-full bg-gray-800/30 py-2 backdrop-blur-sm">
-      <div className="w-full px-4">
-        <div className="flex justify-end">
-          <span className="text-xs text-gray-500">
-            <a
-              href="https://buymeacoffee.com/wilsman77"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-purple-400 hover:text-purple-300 transition-colors duration-200"
-            >
-              Wilsman77
-            </a>{" "}
-            updated on 11/08/2025
-          </span>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-import "./globals.css";
