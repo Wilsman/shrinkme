@@ -4,7 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputPath = path.join(repoRoot, "public", "latest-commit.json");
+const outputPaths = [
+  path.join(repoRoot, "public", "latest-commit.json"),
+  path.join(repoRoot, "generated", "latest-commit.json"),
+];
 
 const runGit = (args) =>
   execFileSync("git", args, {
@@ -68,6 +71,8 @@ const payload = {
   subject,
 };
 
-mkdirSync(path.dirname(outputPath), { recursive: true });
-writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-console.log(`Wrote ${path.relative(repoRoot, outputPath)}`);
+for (const outputPath of outputPaths) {
+  mkdirSync(path.dirname(outputPath), { recursive: true });
+  writeFileSync(outputPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  console.log(`Wrote ${path.relative(repoRoot, outputPath)}`);
+}

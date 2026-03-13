@@ -1,6 +1,4 @@
-"use client";
-
-import { useEffect, useState } from "react";
+import latestCommitMeta from "@/generated/latest-commit.json";
 
 type LatestCommitMeta = {
   branch: string;
@@ -25,38 +23,9 @@ const formatCommitDate = (value: string) => {
 };
 
 export function LatestCommitPill() {
-  const [meta, setMeta] = useState<LatestCommitMeta | null>(null);
+  const meta = latestCommitMeta as LatestCommitMeta | null;
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadLatestCommit = async () => {
-      try {
-        const response = await fetch(`/latest-commit.json?ts=${Date.now()}`, {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = (await response.json()) as LatestCommitMeta;
-        if (!cancelled) {
-          setMeta(payload);
-        }
-      } catch {
-        // Commit metadata is optional; hide the row if unavailable.
-      }
-    };
-
-    void loadLatestCommit();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!meta) {
+  if (!meta || !meta.shortHash) {
     return null;
   }
 
