@@ -1,9 +1,9 @@
 {
   "branch": "main",
-  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/b15229f615b186f0731ca51b207656622e24ec87",
-  "committedAt": "2026-03-13T15:32:47Z",
-  "fullHash": "b15229f615b186f0731ca51b207656622e24ec87",
+  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/def26cc1b7499becf556b63ca9b017b16f963107",
+  "committedAt": "2026-03-13T15:38:50Z",
+  "fullHash": "def26cc1b7499becf556b63ca9b017b16f963107",
   "repoUrl": "https://github.com/Wilsman/shrinkme",
-  "shortHash": "b15229f",
-  "subject": "Update latest commit metadata snapshot"
+  "shortHash": "def26cc",
+  "subject": "Make latest commit pill fully clickable with GitHub URL fallback"
 }
