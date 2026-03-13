@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "prepare": "node scripts/setup-git-hooks.mjs",
+    "prepare": "node scripts/prepare-project.mjs",
     "predev": "node scripts/update-latest-commit.mjs",
     "dev": "next dev",
     "prebuild": "node scripts/update-latest-commit.mjs",

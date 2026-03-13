@@ -1,0 +1,9 @@
+{
+  "branch": "main",
+  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/81cd4919364f10d779b98148ddc6935c10ff70a1",
+  "committedAt": "2026-03-13T15:28:25Z",
+  "fullHash": "81cd4919364f10d779b98148ddc6935c10ff70a1",
+  "repoUrl": "https://github.com/Wilsman/shrinkme",
+  "shortHash": "81cd491",
+  "subject": "Embed latest commit metadata at build time"
+}
