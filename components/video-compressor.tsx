@@ -22,6 +22,113 @@ import {
   QUALITY_VERY_HIGH as MB_QUALITY_VERY_HIGH,
 } from "mediabunny";
 
+type GifsicleModule = {
+  run(options: {
+    input: Array<{
+      file: string | Blob | File | ArrayBuffer;
+      name: string;
+    }>;
+    command: string[];
+    folder?: string[];
+    isStrict?: boolean;
+  }): Promise<File[] | null>;
+};
+
+type GifCompressionAttempt = {
+  label: string;
+  lossy: number;
+  scale: number;
+  colors?: number;
+  optimizeLevel: 1 | 2;
+};
+
+let gifsicleModulePromise: Promise<GifsicleModule> | null = null;
+
+const loadGifsicle = async (): Promise<GifsicleModule> => {
+  if (!gifsicleModulePromise) {
+    gifsicleModulePromise = import("gifsicle-wasm-browser").then(
+      (module) => module.default as GifsicleModule
+    );
+  }
+
+  return gifsicleModulePromise;
+};
+
+const buildGifCompressionAttempts = (
+  sourceBytes: number,
+  targetBytes: number
+): GifCompressionAttempt[] => {
+  const sizeRatio = targetBytes / Math.max(1, sourceBytes);
+  const baseScale =
+    sizeRatio < 1 ? Math.max(0.35, Math.min(1, Math.sqrt(sizeRatio) * 1.05)) : 1;
+
+  const attempts: GifCompressionAttempt[] = [
+    { label: "light", lossy: 20, scale: 1, optimizeLevel: 1 },
+    {
+      label: "balanced",
+      lossy: 40,
+      scale: Math.min(1, Math.max(baseScale, 0.85)),
+      optimizeLevel: 1,
+    },
+    {
+      label: "strong",
+      lossy: 60,
+      scale: Math.min(1, Math.max(baseScale * 0.95, 0.7)),
+      colors: sourceBytes > targetBytes ? 192 : undefined,
+      optimizeLevel: 1,
+    },
+    {
+      label: "aggressive",
+      lossy: 90,
+      scale: Math.min(1, Math.max(baseScale * 0.85, 0.55)),
+      colors: 128,
+      optimizeLevel: 1,
+    },
+    {
+      label: "maximum",
+      lossy: 120,
+      scale: Math.min(1, Math.max(baseScale * 0.75, 0.4)),
+      colors: 96,
+      optimizeLevel: 2,
+    },
+  ];
+
+  const seen = new Set<string>();
+  return attempts.filter((attempt) => {
+    const key = [
+      attempt.lossy,
+      attempt.optimizeLevel,
+      attempt.colors ?? 256,
+      attempt.scale.toFixed(3),
+    ].join(":");
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildGifCompressionCommand = (
+  inputName: string,
+  attempt: GifCompressionAttempt
+) => {
+  const commandParts = [`-O${attempt.optimizeLevel}`, `--lossy=${attempt.lossy}`];
+
+  if (attempt.colors && attempt.colors < 256) {
+    commandParts.push(`--colors ${attempt.colors}`);
+  }
+
+  if (attempt.scale < 0.995) {
+    commandParts.push(`--scale ${attempt.scale.toFixed(3)}`);
+  }
+
+  commandParts.push(inputName, "-o /out/compressed.gif");
+  return commandParts.join(" ");
+};
+
 export function VideoCompressor() {
   const [isReady, setIsReady] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
@@ -298,7 +405,6 @@ export function VideoCompressor() {
 
     if (isGif) {
       setEncodeEngine("browser");
-      setOutputFormat("webm-vp9");
     }
 
     toast.success(`${isGif ? "GIF" : "Video"} selected`, {
@@ -441,7 +547,7 @@ export function VideoCompressor() {
     handleSeek(0);
   };
 
-  const compressGifWithBrowser = async () => {
+  const compressGifWithGifsicle = async () => {
     if (!originalVideo) return;
 
     setIsCompressing(true);
@@ -453,135 +559,98 @@ export function VideoCompressor() {
     setCurrentQualityLevel("");
     setIsPlaying(false);
 
-    toast.loading("Converting…", {
+    toast.loading("Compressing GIF", {
       id: "compress",
-      description: "Decoding GIF frames",
+      description: "Loading gifsicle",
       duration: Infinity,
     });
 
-    let decoder: any = null;
-    let stream: MediaStream | null = null;
+    const decoder: { close?: () => void } | null = null;
+    const stream: MediaStream | null = null;
 
     try {
-      const ImageDecoderCtor = (window as any).ImageDecoder;
-      const supportsGifDecoding =
-        typeof ImageDecoderCtor?.isTypeSupported === "function" &&
-        (await ImageDecoderCtor.isTypeSupported("image/gif"));
-
-      if (!ImageDecoderCtor || !supportsGifDecoding) {
-        throw new Error(
-          "This browser cannot decode GIF files for export. Try Chrome or Edge."
-        );
-      }
-
-      decoder = new ImageDecoderCtor({
-        data: await originalVideo.arrayBuffer(),
-        type: "image/gif",
-      });
-      await decoder.completed;
-
-      const track = decoder.tracks?.selectedTrack;
-      const frameCount = Math.max(1, track?.frameCount ?? 1);
-      const firstFrame = await decoder.decode({ frameIndex: 0 });
-      const firstImage = firstFrame.image as any;
-      const sourceWidth = Math.max(
-        2,
-        firstImage.displayWidth || firstImage.codedWidth || 2
-      );
-      const sourceHeight = Math.max(
-        2,
-        firstImage.displayHeight || firstImage.codedHeight || 2
-      );
-      const getFrameDurationMs = (frame: any) =>
-        Math.max(20, Math.round((frame?.duration ?? 100_000) / 1000));
-
-      let totalDurationMs = getFrameDurationMs(firstImage);
-      firstImage.close?.();
-
-      for (let frameIndex = 1; frameIndex < frameCount; frameIndex += 1) {
-        const decodedFrame = await decoder.decode({ frameIndex });
-        totalDurationMs += getFrameDurationMs(decodedFrame.image);
-        decodedFrame.image.close?.();
-        setProgress(Math.max(5, Math.round((frameIndex / frameCount) * 20)));
-      }
-
-      const durationSeconds = Math.max(0.1, totalDurationMs / 1000);
       const targetBytes = targetSizeMB * 1024 * 1024;
-      const targetBits = targetBytes * 8 * 0.93;
-      const targetVideoBitrate = Math.floor(targetBits / durationSeconds);
-      const videoBitsPerSecond = Math.max(
-        250_000,
-        Math.min(targetVideoBitrate, 5_000_000)
-      );
+      const gifsicle = await loadGifsicle();
+      const inputName = originalVideo.name.toLowerCase().endsWith(".gif")
+        ? originalVideo.name
+        : `${originalVideo.name}.gif`;
+      const attempts = buildGifCompressionAttempts(originalVideo.size, targetBytes);
 
-      let scaleFactor = 1;
-      if (originalVideo.size > targetBytes * 4) {
-        scaleFactor = 0.55;
-      } else if (originalVideo.size > targetBytes * 2) {
-        scaleFactor = 0.7;
-      } else if (originalVideo.size > targetBytes) {
-        scaleFactor = 0.85;
-      }
+      let bestResult: File | null = null;
+      let bestAttempt: GifCompressionAttempt | null = null;
 
-      let targetWidth = Math.max(2, Math.floor(sourceWidth * scaleFactor));
-      let targetHeight = Math.max(2, Math.floor(sourceHeight * scaleFactor));
-      targetWidth -= targetWidth % 2;
-      targetHeight -= targetHeight % 2;
+      for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
+        const attempt = attempts[attemptIndex];
 
-      const MAX_DIMENSION = 1280;
-      if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
-        if (targetWidth >= targetHeight) {
-          const ratio = MAX_DIMENSION / targetWidth;
-          targetWidth = MAX_DIMENSION;
-          targetHeight = Math.max(2, Math.floor(targetHeight * ratio));
-        } else {
-          const ratio = MAX_DIMENSION / targetHeight;
-          targetHeight = MAX_DIMENSION;
-          targetWidth = Math.max(2, Math.floor(targetWidth * ratio));
+        setCompressionAttempt(attemptIndex + 1);
+        setCurrentQualityLevel(attempt.label);
+        setProgress(Math.max(5, Math.round((attemptIndex / attempts.length) * 100)));
+
+        toast.loading("Compressing GIF", {
+          id: "compress",
+          description: `Attempt ${attemptIndex + 1}/${attempts.length}: ${
+            attempt.label
+          }`,
+          duration: Infinity,
+        });
+
+        const outputFiles = await gifsicle.run({
+          input: [{ file: originalVideo, name: inputName }],
+          command: [buildGifCompressionCommand(inputName, attempt)],
+          isStrict: true,
+        });
+        const outputFile =
+          outputFiles?.find((file) => file.name.toLowerCase().endsWith(".gif")) ??
+          outputFiles?.[0];
+
+        if (!outputFile) {
+          throw new Error("gifsicle did not return a compressed GIF.");
         }
-        targetWidth -= targetWidth % 2;
-        targetHeight -= targetHeight % 2;
+
+        if (!bestResult || outputFile.size < bestResult.size) {
+          bestResult = outputFile;
+          bestAttempt = attempt;
+        }
+
+        setProgress(
+          Math.max(10, Math.round(((attemptIndex + 1) / attempts.length) * 100))
+        );
+
+        if (outputFile.size <= targetBytes) {
+          break;
+        }
       }
 
-      const canvas = document.createElement("canvas");
-      canvas.width = targetWidth;
-      canvas.height = targetHeight;
-      const ctx = canvas.getContext("2d", { alpha: true });
-      if (!ctx) {
-        throw new Error("Could not create a canvas context for GIF export.");
+      if (!bestResult) {
+        throw new Error("gifsicle could not produce a compressed GIF.");
       }
 
-      stream = (canvas as any).captureStream(60);
-      const mimeCandidates = [
-        "video/webm;codecs=vp9",
-        "video/webm;codecs=vp8",
-        "video/webm",
-      ];
+      const compressedUrl = URL.createObjectURL(bestResult);
+      replaceCompressedVideoUrl(compressedUrl);
+      setCompressedSize(bestResult.size);
+      setRecordedMimeType(bestResult.type || "image/gif");
+      setProgress(100);
 
-      const supportedMime = mimeCandidates.find((type) =>
-        (window as any).MediaRecorder?.isTypeSupported?.(type)
+      const reduction = Math.round(
+        (1 - bestResult.size / Math.max(1, originalVideo.size)) * 100
       );
 
-      if (!supportedMime) {
-        throw new Error("This browser cannot encode GIF exports.");
-      }
-
-      if (outputFormat !== "webm-vp9") {
-        setOutputFormat("webm-vp9");
-        toast.message("GIF export switched to WebM", {
-          description: "Browser GIF recording is more reliable with WebM output.",
+      if (bestResult.size <= targetBytes) {
+        toast.success("GIF compression complete", {
+          id: "compress",
+          description: `${formatFileSize(bestResult.size)} - ${reduction}% smaller`,
+        });
+      } else {
+        toast.warning("GIF compression complete", {
+          id: "compress",
+          description: `${formatFileSize(bestResult.size)} with ${
+            bestAttempt?.label ?? "best"
+          } settings`,
         });
       }
 
-      const captureStream = stream;
-      if (!captureStream) {
-        throw new Error("Could not create a capture stream for GIF export.");
-      }
-
-      const mediaRecorder = new MediaRecorder(captureStream, {
-        mimeType: supportedMime,
-        videoBitsPerSecond,
-      });
+      return;
+      {
       const chunks: Blob[] = [];
       const finaliseExport = new Promise<void>((resolve, reject) => {
         mediaRecorder.ondataavailable = (event) => {
@@ -642,10 +711,11 @@ export function VideoCompressor() {
 
       mediaRecorder.stop();
       await finaliseExport;
+      }
     } catch (error: any) {
-      console.error("GIF conversion failed", error);
-      setError(error?.message || "GIF conversion failed");
-      toast.error("GIF conversion failed", {
+      console.error("GIF compression failed", error);
+      setError(error?.message || "GIF compression failed");
+      toast.error("GIF compression failed", {
         id: "compress",
         description: error?.message || String(error),
       });
@@ -666,11 +736,11 @@ export function VideoCompressor() {
     if (isGifInput) {
       if (encodeEngine !== "browser") {
         setEncodeEngine("browser");
-        toast.message("GIF input uses browser decoding", {
-          description: "Animated GIF export uses WebCodecs and MediaRecorder.",
+        toast.message("GIF input uses gifsicle", {
+          description: "Animated GIF uploads stay in GIF format during compression.",
         });
       }
-      await compressGifWithBrowser();
+      await compressGifWithGifsicle();
       return;
     }
 
@@ -1057,7 +1127,11 @@ export function VideoCompressor() {
 
     const a = document.createElement("a");
     a.href = compressedVideo;
-    const ext = recordedMimeType?.includes("mp4") ? "mp4" : "webm";
+    const ext = recordedMimeType?.includes("gif")
+      ? "gif"
+      : recordedMimeType?.includes("mp4")
+      ? "mp4"
+      : "webm";
     a.download = originalVideo
       ? `compressed-${originalVideo.name.replace(/\.[^/.]+$/, "")}.${ext}`
       : `compressed-media.${ext}`;

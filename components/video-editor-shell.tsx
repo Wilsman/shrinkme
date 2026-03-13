@@ -181,7 +181,7 @@ export function VideoEditorShell({
           </div>
           <div className="text-xs text-[#9a968d]">
             {isGifInput
-              ? "GIF conversion keeps the source intact and exports as video."
+              ? "GIF compression keeps the source animated and exports another GIF."
               : "Scrub or trim in the timeline and preview the selection instantly."}
           </div>
         </div>
@@ -225,8 +225,8 @@ export function VideoEditorShell({
 
           {isGifInput ? (
             <div className="border-t border-[#2a2a2a] px-4 py-3 text-sm text-[#9a968d]">
-              GIF sources export through browser decoding and recording. Timeline
-              trimming and frame stepping stay available for video sources.
+              GIF sources export through gifsicle compression. Timeline trimming
+              and frame stepping stay available for video sources.
             </div>
           ) : (
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#2a2a2a] px-4 py-3">
@@ -318,7 +318,9 @@ export function VideoEditorShell({
             <div>
               <div className="text-sm font-medium text-[#f3efe6]">Preview</div>
               <div className="text-xs text-[#9a968d]">
-                Review the exported clip or switch back to the source to keep trimming.
+                {isGifInput
+                  ? "Review the exported GIF or switch back to the source."
+                  : "Review the exported clip or switch back to the source to keep trimming."}
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -358,12 +360,20 @@ export function VideoEditorShell({
               <div className="flex min-h-0 flex-1 items-center justify-center p-4">
                 <div className="relative flex h-full w-full items-center justify-center border border-[#252525] bg-[#0b0b0b]">
                   {previewMode === "export" ? (
-                    <video
-                      src={compressedVideo}
-                      controls
-                      className="max-h-full max-w-full object-contain"
-                      playsInline
-                    />
+                    isGifInput ? (
+                      <img
+                        src={compressedVideo}
+                        alt="Compressed GIF preview"
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : (
+                      <video
+                        src={compressedVideo}
+                        controls
+                        className="max-h-full max-w-full object-contain"
+                        playsInline
+                      />
+                    )
                   ) : isGifInput ? (
                     <img
                       src={videoObjectUrl || ""}
@@ -725,8 +735,8 @@ export function VideoEditorShell({
 
             {isGifInput && (
               <div className="border border-[#4b3720] bg-[#20170d] px-3 py-2 text-xs text-[#d8a86a]">
-                GIF input exports through browser decoding and records to WebM
-                video for reliability. Timeline trim remains video-only.
+                GIF input exports through gifsicle and stays in GIF format.
+                Timeline trim remains video-only.
               </div>
             )}
           </div>
@@ -858,8 +868,8 @@ export function VideoEditorShell({
 
       {isGifInput ? (
         <div className="flex flex-1 items-center justify-center px-6 text-sm text-[#9a968d]">
-          GIF inputs skip the editor timeline. Export settings remain available in
-          the inspector.
+          GIF inputs skip the editor timeline. Compression settings remain
+          available in the inspector.
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
