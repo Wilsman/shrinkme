@@ -1,6 +1,7 @@
 "use client";
 
 import type React from "react";
+import { LatestCommitPill } from "@/components/latest-commit-pill";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -83,6 +84,10 @@ export function UploadSurface({
               Fast local processing
             </span>
           </div>
+        </div>
+
+        <div className="mt-3">
+          <LatestCommitPill />
         </div>
       </div>
     </div>
