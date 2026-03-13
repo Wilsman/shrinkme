@@ -33,6 +33,15 @@ const normaliseRepoUrl = (value) => {
     return value.replace(/\.git$/, "");
   }
 
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname === "github.com") {
+      return `https://github.com${parsed.pathname.replace(/\.git$/, "")}`;
+    }
+  } catch {
+    // Fall through to null for unparseable remotes.
+  }
+
   return null;
 };
 
