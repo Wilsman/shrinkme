@@ -1,9 +1,9 @@
 {
   "branch": "main",
-  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/3565308b5e8066bcebe2031ab35440566d9811c6",
-  "committedAt": "2026-03-13T15:41:38Z",
-  "fullHash": "3565308b5e8066bcebe2031ab35440566d9811c6",
+  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/0504fcbf09cd7ea9c80d16c28c16059070df2539",
+  "committedAt": "2026-03-13T15:41:49Z",
+  "fullHash": "0504fcbf09cd7ea9c80d16c28c16059070df2539",
   "repoUrl": "https://github.com/Wilsman/shrinkme",
-  "shortHash": "3565308",
-  "subject": "Condense latest commit pill into a single-line layout"
+  "shortHash": "0504fcb",
+  "subject": "Update latest-commit metadata for single-line pill change"
 }
