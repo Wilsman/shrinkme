@@ -1,0 +1,2 @@
+#!/bin/sh
+node scripts/update-latest-commit.mjs >/dev/null 2>&1 || true

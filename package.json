@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "prepare": "node scripts/setup-git-hooks.mjs",
+    "predev": "node scripts/update-latest-commit.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/update-latest-commit.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "commit:refresh": "node scripts/update-latest-commit.mjs",
+    "hooks:install": "node scripts/setup-git-hooks.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",
