@@ -4,7 +4,6 @@ import type React from "react";
 import { useState, useRef, useEffect } from "react";
 import { formatFileSize } from "@/lib/utils";
 import { toast } from "sonner";
-import { UploadSurface } from "@/components/upload-surface";
 import { VideoEditorShell } from "@/components/video-editor-shell";
 import {
   Input as MBInput,
@@ -154,7 +153,7 @@ export function VideoCompressor() {
   const [encodeEngine, setEncodeEngine] = useState<"browser" | "mediabunny">(
     "mediabunny"
   );
-  const [targetSizeMB, setTargetSizeMB] = useState<number>(10);
+  const [targetSizeMB, setTargetSizeMB] = useState<number>(20);
   const [compressionAttempt, setCompressionAttempt] = useState(0);
   const [currentQualityLevel, setCurrentQualityLevel] = useState<string>("");
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -192,7 +191,8 @@ export function VideoCompressor() {
 
   const targetSizeOptions = [
     { value: 8, label: "8 MB" },
-    { value: 10, label: "10 MB (Default)" },
+    { value: 10, label: "10 MB" },
+    { value: 20, label: "20 MB (Default)" },
     { value: 25, label: "25 MB" },
     { value: 50, label: "50 MB" },
     { value: 100, label: "100 MB" },
@@ -616,7 +616,7 @@ export function VideoCompressor() {
           Math.max(10, Math.round(((attemptIndex + 1) / attempts.length) * 100))
         );
 
-        if (outputFile.size <= targetBytes) {
+        if (outputFile.size < targetBytes) {
           break;
         }
       }
@@ -635,7 +635,7 @@ export function VideoCompressor() {
         (1 - bestResult.size / Math.max(1, originalVideo.size)) * 100
       );
 
-      if (bestResult.size <= targetBytes) {
+      if (bestResult.size < targetBytes) {
         toast.success("GIF compression complete", {
           id: "compress",
           description: `${formatFileSize(bestResult.size)} - ${reduction}% smaller`,
@@ -1022,7 +1022,7 @@ export function VideoCompressor() {
         const finalSize = blob.size;
         const targetBytes = targetSizeMB * 1024 * 1024;
 
-        if (finalSize > targetBytes) {
+        if (finalSize >= targetBytes) {
           console.warn(
             `Compressed size ${finalSize} is still over ${targetSizeMB}MB, would need further compression`
           );
@@ -1341,7 +1341,7 @@ export function VideoCompressor() {
         );
 
         // Check if this result meets the target size
-        if (blob.size <= targetBytes) {
+        if (blob.size < targetBytes) {
           // Success! This quality level produces a file under the target size
           const url = URL.createObjectURL(blob);
           bestResult = { blob, url, quality: name };
@@ -1407,7 +1407,7 @@ export function VideoCompressor() {
   const sourcePreview = isGifInput ? videoObjectUrl : thumbnails[0] || videoObjectUrl;
 
   return (
-    <div className="min-h-screen bg-[#111111] text-[#f3efe6]">
+    <div className="h-screen overflow-hidden bg-[#111111] text-[#f3efe6]">
       <input
         type="file"
         ref={fileInputRef}
@@ -1416,16 +1416,6 @@ export function VideoCompressor() {
         className="hidden"
       />
 
-      {!originalVideo ? (
-        <UploadSurface
-          error={error}
-          isDragging={isDraggingFile}
-          isReady={isReady}
-          onBrowse={handleUploadClick}
-          onFileDrop={handleSelectedFile}
-          onDraggingChange={setIsDraggingFile}
-        />
-      ) : (
         <VideoEditorShell
           compressedSize={compressedSize}
           compressedVideo={compressedVideo}
@@ -1442,7 +1432,9 @@ export function VideoCompressor() {
           isGifInput={isGifInput}
           isLooping={isLooping}
           isPlaying={isPlaying}
-          originalFileName={originalVideo.name}
+          hasMedia={Boolean(originalVideo)}
+          isReady={isReady}
+          originalFileName={originalVideo?.name ?? null}
           originalSize={originalSize}
           outputFormat={outputFormat}
           playheadTime={currentTime}
@@ -1461,11 +1453,21 @@ export function VideoCompressor() {
           onCompress={compressVideo}
           onDownload={downloadCompressedVideo}
           onEncodeEngineChange={setEncodeEngine}
+          onFileDrop={handleSelectedFile}
           onFrameStep={handleFrameStep}
           onOutputFormatChange={setOutputFormat}
           onReplaceSource={handleUploadClick}
           onResetCompressor={resetCompressor}
           onResetTrim={resetTrim}
+          onSeek={handleSeek}
+          onSetInPoint={() => {
+            if (videoDuration <= 0) return;
+            setTrimStart(Math.max(0, Math.min(currentTime, resolvedTrimEnd - 0.1)));
+          }}
+          onSetOutPoint={() => {
+            if (videoDuration <= 0) return;
+            setTrimEnd(Math.min(videoDuration, Math.max(currentTime, trimStart + 0.1)));
+          }}
           onTargetSizeChange={setTargetSizeMB}
           onTimelinePointerDown={handleTimelinePointerDown}
           onToggleLoop={() => setIsLooping((value) => !value)}
@@ -1480,7 +1482,6 @@ export function VideoCompressor() {
             }
           }}
         />
-      )}
     </div>
   );
 }

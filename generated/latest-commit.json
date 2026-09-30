@@ -1,9 +1,9 @@
 {
   "branch": "main",
-  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/0504fcbf09cd7ea9c80d16c28c16059070df2539",
-  "committedAt": "2026-03-13T15:41:49Z",
-  "fullHash": "0504fcbf09cd7ea9c80d16c28c16059070df2539",
+  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/880646d4ec811e93883d9ceeb42bfc111b8e1f2d",
+  "committedAt": "2026-03-13T23:07:22Z",
+  "fullHash": "880646d4ec811e93883d9ceeb42bfc111b8e1f2d",
   "repoUrl": "https://github.com/Wilsman/shrinkme",
-  "shortHash": "0504fcb",
-  "subject": "Update latest-commit metadata for single-line pill change"
+  "shortHash": "880646d",
+  "subject": "Update latest commit metadata JSON"
 }
