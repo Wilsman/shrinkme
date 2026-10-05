@@ -599,11 +599,14 @@ export function VideoEditorShell({
     </section>
   );
 
+  // The preview must not sit inside a rounded overflow clip: Chromium can fail
+  // to composite <video> under a border-radius mask, leaving the stage blank.
+  // Round the background only and keep every clip around the video square.
   const renderPreviewPanel = () => (
-    <section className="flex h-full min-h-0 flex-col bg-[#171717]">
+    <section className="flex h-full min-h-0 flex-col rounded-[6px] bg-[#171717]">
       <div
         ref={stageRef}
-        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#171717] p-4"
+        className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 [&:fullscreen]:bg-[#171717]"
       >
         {!hasMedia ? (
           <div className="flex w-full max-w-sm flex-col items-center gap-4 text-center">
@@ -1254,7 +1257,7 @@ export function VideoEditorShell({
       {!isDesktop ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
           <div className="space-y-1.5">
-            <div className="h-[48vh] overflow-hidden rounded-[6px]">
+            <div className="h-[48vh]">
               {renderPreviewPanel()}
             </div>
             <div className="h-[168px] overflow-hidden rounded-[6px]">
@@ -1291,7 +1294,7 @@ export function VideoEditorShell({
                 <ResizablePanel
                   defaultSize={58}
                   minSize={30}
-                  className="min-w-0 overflow-hidden rounded-[6px]"
+                  className="min-w-0"
                 >
                   {renderPreviewPanel()}
                 </ResizablePanel>
