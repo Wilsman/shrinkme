@@ -27,3 +27,6 @@ yarn-error.log*
 next-env.d.ts
 repomix-output.txt
 public/latest-commit.json
+
+# gifsicle wasm (copied from node_modules by scripts/copy-gifsicle.mjs)
+/public/vendor/gifsicle/

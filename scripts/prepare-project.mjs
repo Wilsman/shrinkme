@@ -13,3 +13,4 @@ const runNodeScript = (scriptName) => {
 
 runNodeScript("setup-git-hooks.mjs");
 runNodeScript("update-latest-commit.mjs");
+runNodeScript("copy-gifsicle.mjs");

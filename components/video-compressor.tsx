@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import { formatFileSize } from "@/lib/utils";
 import { toast } from "sonner";
 import { VideoEditorShell } from "@/components/video-editor-shell";
+import { compressGif, warmupGifsicle } from "@/lib/gif-compression";
 import {
   Input as MBInput,
   Output as MBOutput,
@@ -14,119 +15,16 @@ import {
   BufferTarget as MBBufferTarget,
   Mp4OutputFormat as MBMp4OutputFormat,
   WebMOutputFormat as MBWebMOutputFormat,
-  QUALITY_VERY_LOW as MB_QUALITY_VERY_LOW,
-  QUALITY_LOW as MB_QUALITY_LOW,
-  QUALITY_MEDIUM as MB_QUALITY_MEDIUM,
-  QUALITY_HIGH as MB_QUALITY_HIGH,
-  QUALITY_VERY_HIGH as MB_QUALITY_VERY_HIGH,
+  Quality as MBQuality,
+  getFirstEncodableVideoCodec as MBGetFirstEncodableVideoCodec,
+  getFirstEncodableAudioCodec as MBGetFirstEncodableAudioCodec,
+  type VideoCodec as MBVideoCodec,
 } from "mediabunny";
-
-type GifsicleModule = {
-  run(options: {
-    input: Array<{
-      file: string | Blob | File | ArrayBuffer;
-      name: string;
-    }>;
-    command: string[];
-    folder?: string[];
-    isStrict?: boolean;
-  }): Promise<File[] | null>;
-};
-
-type GifCompressionAttempt = {
-  label: string;
-  lossy: number;
-  scale: number;
-  colors?: number;
-  optimizeLevel: 1 | 2;
-};
-
-let gifsicleModulePromise: Promise<GifsicleModule> | null = null;
-
-const loadGifsicle = async (): Promise<GifsicleModule> => {
-  if (!gifsicleModulePromise) {
-    gifsicleModulePromise = import("gifsicle-wasm-browser").then(
-      (module) => module.default as GifsicleModule
-    );
-  }
-
-  return gifsicleModulePromise;
-};
-
-const buildGifCompressionAttempts = (
-  sourceBytes: number,
-  targetBytes: number
-): GifCompressionAttempt[] => {
-  const sizeRatio = targetBytes / Math.max(1, sourceBytes);
-  const baseScale =
-    sizeRatio < 1 ? Math.max(0.35, Math.min(1, Math.sqrt(sizeRatio) * 1.05)) : 1;
-
-  const attempts: GifCompressionAttempt[] = [
-    { label: "light", lossy: 20, scale: 1, optimizeLevel: 1 },
-    {
-      label: "balanced",
-      lossy: 40,
-      scale: Math.min(1, Math.max(baseScale, 0.85)),
-      optimizeLevel: 1,
-    },
-    {
-      label: "strong",
-      lossy: 60,
-      scale: Math.min(1, Math.max(baseScale * 0.95, 0.7)),
-      colors: sourceBytes > targetBytes ? 192 : undefined,
-      optimizeLevel: 1,
-    },
-    {
-      label: "aggressive",
-      lossy: 90,
-      scale: Math.min(1, Math.max(baseScale * 0.85, 0.55)),
-      colors: 128,
-      optimizeLevel: 1,
-    },
-    {
-      label: "maximum",
-      lossy: 120,
-      scale: Math.min(1, Math.max(baseScale * 0.75, 0.4)),
-      colors: 96,
-      optimizeLevel: 2,
-    },
-  ];
-
-  const seen = new Set<string>();
-  return attempts.filter((attempt) => {
-    const key = [
-      attempt.lossy,
-      attempt.optimizeLevel,
-      attempt.colors ?? 256,
-      attempt.scale.toFixed(3),
-    ].join(":");
-
-    if (seen.has(key)) {
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
-};
-
-const buildGifCompressionCommand = (
-  inputName: string,
-  attempt: GifCompressionAttempt
-) => {
-  const commandParts = [`-O${attempt.optimizeLevel}`, `--lossy=${attempt.lossy}`];
-
-  if (attempt.colors && attempt.colors < 256) {
-    commandParts.push(`--colors ${attempt.colors}`);
-  }
-
-  if (attempt.scale < 0.995) {
-    commandParts.push(`--scale ${attempt.scale.toFixed(3)}`);
-  }
-
-  commandParts.push(inputName, "-o /out/compressed.gif");
-  return commandParts.join(" ");
-};
+import {
+  correctVideoBitrate,
+  planVideoEncode,
+  type VideoCodecFamily,
+} from "@/lib/video-plan";
 
 export function VideoCompressor() {
   const [isReady, setIsReady] = useState(false);
@@ -405,6 +303,8 @@ export function VideoCompressor() {
 
     if (isGif) {
       setEncodeEngine("browser");
+      // Start compiling gifsicle while the user picks settings.
+      warmupGifsicle();
     }
 
     toast.success(`${isGif ? "GIF" : "Video"} selected`, {
@@ -565,152 +465,41 @@ export function VideoCompressor() {
       duration: Infinity,
     });
 
-    const decoder: { close?: () => void } | null = null;
-    const stream: MediaStream | null = null;
-
     try {
       const targetBytes = targetSizeMB * 1024 * 1024;
-      const gifsicle = await loadGifsicle();
-      const inputName = originalVideo.name.toLowerCase().endsWith(".gif")
-        ? originalVideo.name
-        : `${originalVideo.name}.gif`;
-      const attempts = buildGifCompressionAttempts(originalVideo.size, targetBytes);
-
-      let bestResult: File | null = null;
-      let bestAttempt: GifCompressionAttempt | null = null;
-
-      for (let attemptIndex = 0; attemptIndex < attempts.length; attemptIndex += 1) {
-        const attempt = attempts[attemptIndex];
-
-        setCompressionAttempt(attemptIndex + 1);
-        setCurrentQualityLevel(attempt.label);
-        setProgress(Math.max(5, Math.round((attemptIndex / attempts.length) * 100)));
-
+      const result = await compressGif(originalVideo, targetBytes, (update) => {
+        setCompressionAttempt(update.round);
+        setCurrentQualityLevel(update.description);
+        setProgress(Math.round(((update.round - 1) / update.maxRounds) * 100) + 5);
         toast.loading("Compressing GIF", {
           id: "compress",
-          description: `Attempt ${attemptIndex + 1}/${attempts.length}: ${
-            attempt.label
-          }`,
+          description: `Pass ${update.round}: ${update.description}`,
           duration: Infinity,
         });
+      });
 
-        const outputFiles = await gifsicle.run({
-          input: [{ file: originalVideo, name: inputName }],
-          command: [buildGifCompressionCommand(inputName, attempt)],
-          isStrict: true,
-        });
-        const outputFile =
-          outputFiles?.find((file) => file.name.toLowerCase().endsWith(".gif")) ??
-          outputFiles?.[0];
-
-        if (!outputFile) {
-          throw new Error("gifsicle did not return a compressed GIF.");
-        }
-
-        if (!bestResult || outputFile.size < bestResult.size) {
-          bestResult = outputFile;
-          bestAttempt = attempt;
-        }
-
-        setProgress(
-          Math.max(10, Math.round(((attemptIndex + 1) / attempts.length) * 100))
-        );
-
-        if (outputFile.size < targetBytes) {
-          break;
-        }
-      }
-
-      if (!bestResult) {
-        throw new Error("gifsicle could not produce a compressed GIF.");
-      }
-
-      const compressedUrl = URL.createObjectURL(bestResult);
-      replaceCompressedVideoUrl(compressedUrl);
-      setCompressedSize(bestResult.size);
-      setRecordedMimeType(bestResult.type || "image/gif");
+      // If gifsicle couldn't beat the source, keep the original bytes.
+      const output = result.blob.size < originalVideo.size ? result.blob : originalVideo;
+      replaceCompressedVideoUrl(URL.createObjectURL(output));
+      setCompressedSize(output.size);
+      setRecordedMimeType("image/gif");
+      setCurrentQualityLevel(result.label);
       setProgress(100);
 
       const reduction = Math.round(
-        (1 - bestResult.size / Math.max(1, originalVideo.size)) * 100
+        (1 - output.size / Math.max(1, originalVideo.size)) * 100
       );
 
-      if (bestResult.size < targetBytes) {
+      if (output.size <= targetBytes) {
         toast.success("GIF compression complete", {
           id: "compress",
-          description: `${formatFileSize(bestResult.size)} - ${reduction}% smaller`,
+          description: `${formatFileSize(output.size)} - ${reduction}% smaller (${result.label})`,
         });
       } else {
         toast.warning("GIF compression complete", {
           id: "compress",
-          description: `${formatFileSize(bestResult.size)} with ${
-            bestAttempt?.label ?? "best"
-          } settings`,
+          description: `${formatFileSize(output.size)} - still above ${targetSizeMB} MB (${result.label})`,
         });
-      }
-
-      return;
-      {
-      const chunks: Blob[] = [];
-      const finaliseExport = new Promise<void>((resolve, reject) => {
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            chunks.push(event.data);
-          }
-        };
-
-        mediaRecorder.onerror = () => {
-          reject(new Error("GIF recording failed."));
-        };
-
-        mediaRecorder.onstop = () => {
-          const actualType =
-            mediaRecorder.mimeType || chunks[0]?.type || "video/webm";
-          const blob = new Blob(chunks, { type: actualType });
-          const compressedUrl = URL.createObjectURL(blob);
-
-          replaceCompressedVideoUrl(compressedUrl);
-          setCompressedSize(blob.size);
-          setRecordedMimeType(actualType);
-          setProgress(100);
-
-          const reduction = Math.round(
-            (1 - blob.size / Math.max(1, originalVideo.size)) * 100
-          );
-          toast.success("GIF export complete", {
-            id: "compress",
-            description: `${formatFileSize(blob.size)} • ${reduction}% smaller`,
-          });
-
-          resolve();
-        };
-      });
-
-      mediaRecorder.start(250);
-
-      for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
-        const decodedFrame = await decoder.decode({ frameIndex });
-        const frame = decodedFrame.image as any;
-        const durationMs = getFrameDurationMs(frame);
-
-        ctx.clearRect(0, 0, targetWidth, targetHeight);
-        ctx.drawImage(frame, 0, 0, targetWidth, targetHeight);
-        frame.close?.();
-
-        setProgress(Math.max(20, Math.round(((frameIndex + 1) / frameCount) * 100)));
-        toast.loading("Converting…", {
-          id: "compress",
-          description: `Encoding GIF frames • ${Math.round(
-            ((frameIndex + 1) / frameCount) * 100
-          )}%`,
-          duration: Infinity,
-        });
-
-        await new Promise((resolve) => window.setTimeout(resolve, durationMs));
-      }
-
-      mediaRecorder.stop();
-      await finaliseExport;
       }
     } catch (error: any) {
       console.error("GIF compression failed", error);
@@ -720,8 +509,6 @@ export function VideoCompressor() {
         description: error?.message || String(error),
       });
     } finally {
-      stream?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
-      decoder?.close?.();
       setIsCompressing(false);
     }
   };
@@ -1165,7 +952,8 @@ export function VideoCompressor() {
     });
   };
 
-  // Compress using Mediabunny Conversion with automated quality iteration
+  // Compress with Mediabunny (WebCodecs). The bitrate is computed from the
+  // target size, so most files need one pass; overshoots get a corrected retry.
   const compressWithMediabunny = async () => {
     if (!originalVideo) return;
 
@@ -1175,217 +963,173 @@ export function VideoCompressor() {
     setCompressedSize(null);
     setProgress(0);
     setCompressionAttempt(0);
+    setCurrentQualityLevel("");
 
     toast.loading("Converting…", {
       id: "compress",
-      description: "Starting automated compression",
+      description: "Reading video",
       duration: Infinity,
     });
 
-    // Quality levels to try in descending order (highest to lowest)
-    const qualityLevels = [
-      { name: "very_high", quality: MB_QUALITY_VERY_HIGH },
-      { name: "high", quality: MB_QUALITY_HIGH },
-      { name: "medium", quality: MB_QUALITY_MEDIUM },
-      { name: "low", quality: MB_QUALITY_LOW },
-      { name: "very_low", quality: MB_QUALITY_VERY_LOW },
-    ];
-
+    const MAX_ATTEMPTS = 3;
     const targetBytes = targetSizeMB * 1024 * 1024;
-    let bestResult: { blob: Blob; url: string; quality: string } | null = null;
-    let lastAttemptSize = 0;
+    const isMp4 = outputFormat === "mp4-h264";
+    const mime = isMp4 ? "video/mp4" : "video/webm";
 
     try {
-      // Probe dimensions once when a video element is available.
-      const v = !isGifInput ? document.createElement("video") : null;
-      if (v) {
-        v.src = videoObjectUrl || URL.createObjectURL(originalVideo);
-        await new Promise<void>((resolve) => {
-          const done = () => resolve();
-          v.addEventListener("loadedmetadata", done, { once: true });
-          if (v.readyState >= 1) resolve();
-        });
-      }
+      const input = new MBInput({
+        source: new MBBlobSource(originalVideo),
+        formats: MB_ALL_FORMATS,
+      });
+      const videoTrack = await input.getPrimaryVideoTrack();
+      if (!videoTrack) throw new Error("No video track found in this file.");
+      const audioTrack = await input.getPrimaryAudioTrack();
+      const [sourceDuration, packetStats] = await Promise.all([
+        input.computeDuration(),
+        videoTrack.computePacketStats(120),
+      ]);
 
-      const effectiveDuration = Math.max(
-        0.01,
-        isGifInput ? 1 : (trimEnd || videoDuration) - (trimStart || 0)
+      const trimStartSeconds = Math.max(0, trimStart || 0);
+      const trimEndSeconds = Math.min(
+        sourceDuration,
+        trimEnd > trimStartSeconds ? trimEnd : sourceDuration
       );
-      const audioBitsPerSecond =
-        !isGifInput && effectiveDuration > 60 ? 96000 : 128000;
+      const isTrimmed = trimStartSeconds > 0.01 || trimEndSeconds < sourceDuration - 0.01;
+      const durationSeconds = Math.max(0.1, trimEndSeconds - trimStartSeconds);
 
-      // Iterate through quality levels from highest to lowest
-      for (let i = 0; i < qualityLevels.length; i++) {
-        const { name, quality } = qualityLevels[i];
-        setCompressionAttempt(i + 1);
-        setCurrentQualityLevel(name);
+      const outputFormatInstance = isMp4
+        ? new MBMp4OutputFormat({ fastStart: "in-memory" })
+        : new MBWebMOutputFormat();
+      const preferredVideoCodecs: MBVideoCodec[] = isMp4
+        ? ["avc", "hevc", "av1", "vp9"]
+        : ["vp9", "av1", "vp8"];
+      const supportedVideoCodecs = outputFormatInstance.getSupportedVideoCodecs();
+
+      const planFor = (codec: VideoCodecFamily) => planVideoEncode({
+        targetBytes,
+        durationSeconds,
+        sourceWidth: videoTrack.displayWidth,
+        sourceHeight: videoTrack.displayHeight,
+        sourceFrameRate: packetStats.averagePacketRate,
+        sourceBytes: originalVideo.size,
+        sourceDurationSeconds: sourceDuration,
+        hasAudio: Boolean(audioTrack),
+        codec,
+      });
+      let plan = planFor(isMp4 ? "avc" : "vp9");
+
+      const videoCodec = await MBGetFirstEncodableVideoCodec(
+        preferredVideoCodecs.filter((codec) => supportedVideoCodecs.includes(codec)),
+        { width: plan.width, height: plan.height, bitrate: plan.videoBitrate }
+      );
+      if (!videoCodec) {
+        throw new Error("This browser can't encode video for the selected format.");
+      }
+      // A fallback codec has different efficiency, so re-plan for it.
+      if (videoCodec !== (isMp4 ? "avc" : "vp9")) {
+        plan = planFor(videoCodec as VideoCodecFamily);
+      }
+      const audioCodec = audioTrack
+        ? await MBGetFirstEncodableAudioCodec(
+            outputFormatInstance
+              .getSupportedAudioCodecs()
+              .filter((codec) => (isMp4 ? ["aac", "opus"] : ["opus", "vorbis"]).includes(codec)),
+            { bitrate: plan.audioBitrate }
+          )
+        : null;
+
+      let best: { blob: Blob; label: string } | null = null;
+
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+        const label = `${plan.width}x${plan.height} @ ${(plan.videoBitrate / 1_000_000).toFixed(2)} Mbps${
+          plan.frameRate ? ` · ${plan.frameRate} fps` : ""
+        }`;
+        setCompressionAttempt(attempt);
+        setCurrentQualityLevel(label);
         setProgress(0);
 
-        toast.loading("Converting…", {
-          id: "compress",
-          description: `Attempt ${i + 1}/${
-            qualityLevels.length
-          }: ${name} quality`,
-          duration: Infinity,
-        });
-
-        // Prepare input and output for this attempt
-        const input = new MBInput({
-          source: new MBBlobSource(originalVideo),
-          formats: MB_ALL_FORMATS,
-        });
-
-        const format =
-          outputFormat === "mp4-h264"
-            ? new MBMp4OutputFormat()
-            : new MBWebMOutputFormat();
-
         const target = new MBBufferTarget();
-        const output = new MBOutput({ format, target });
+        const output = new MBOutput({
+          format: isMp4
+            ? new MBMp4OutputFormat({ fastStart: "in-memory" })
+            : new MBWebMOutputFormat(),
+          target,
+        });
 
-        // Calculate dimensions based on quality level
-        let scaleFactor = 1;
-        switch (name) {
-          case "very_high":
-            scaleFactor = 0.95;
-            break;
-          case "high":
-            scaleFactor = 0.85;
-            break;
-          case "medium":
-            scaleFactor = 0.75;
-            break;
-          case "low":
-            scaleFactor = 0.65;
-            break;
-          case "very_low":
-            scaleFactor = 0.5;
-            break;
-        }
-
-        let targetWidth: number | undefined;
-        let targetHeight: number | undefined;
-        if (v && v.videoWidth > 0 && v.videoHeight > 0) {
-          targetWidth = Math.max(2, Math.floor(v.videoWidth * scaleFactor));
-          targetHeight = Math.max(2, Math.floor(v.videoHeight * scaleFactor));
-          targetWidth -= targetWidth % 2;
-          targetHeight -= targetHeight % 2;
-
-          const MAX_DIMENSION = 1280;
-          if (targetWidth > MAX_DIMENSION || targetHeight > MAX_DIMENSION) {
-            if (targetWidth > targetHeight) {
-              const ratio = MAX_DIMENSION / targetWidth;
-              targetWidth = MAX_DIMENSION;
-              targetHeight = Math.floor(targetHeight * ratio);
-            } else {
-              const ratio = MAX_DIMENSION / targetHeight;
-              targetHeight = MAX_DIMENSION;
-              targetWidth = Math.floor(targetWidth * ratio);
-            }
-            targetWidth -= targetWidth % 2;
-            targetHeight -= targetHeight % 2;
-          }
-        }
-
-        // Initialize conversion
-        const conv = await MBConversion.init({
+        const conversion = await MBConversion.init({
           input,
           output,
-          trim:
-            !isGifInput && videoDuration > 0
-              ? {
-                  start: Math.max(0, trimStart),
-                  end: Math.min(videoDuration, trimEnd || videoDuration),
-                }
-              : undefined,
+          trim: isTrimmed ? { start: trimStartSeconds, end: trimEndSeconds } : undefined,
           video: {
-            codec:
-              outputFormat === "mp4-h264" ? ("avc" as any) : ("vp9" as any),
-            bitrate: quality as any,
-            width: targetWidth || undefined,
+            codec: videoCodec,
+            width: plan.width,
+            height: plan.height,
+            fit: "fill",
+            frameRate: plan.frameRate,
+            quality: new MBQuality({ bitrate: plan.videoBitrate, bitrateMode: "constant" }),
             forceTranscode: true,
           },
-          audio: {
-            codec:
-              outputFormat === "mp4-h264" ? ("aac" as any) : ("opus" as any),
-            bitrate: audioBitsPerSecond as any,
-            forceTranscode: !isGifInput,
-          },
+          audio:
+            audioCodec && plan.audioBitrate > 0
+              ? {
+                  codec: audioCodec,
+                  quality: new MBQuality({ bitrate: plan.audioBitrate }),
+                  forceTranscode: true,
+                }
+              : { discard: true },
         });
 
-        // Progress updates
-        conv.onProgress = (p: number) => {
-          const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+        if (!conversion.isValid) {
+          throw new Error(
+            conversion.discardedTracks.map((track) => track.reason).join(", ") ||
+              "This file can't be converted in this browser."
+          );
+        }
+
+        conversion.onProgress = (fraction: number) => {
+          const pct = Math.max(0, Math.min(100, Math.round(fraction * 100)));
           setProgress(pct);
           toast.loading("Converting…", {
             id: "compress",
-            description: `Attempt ${i + 1}/${
-              qualityLevels.length
-            }: ${name} - ${pct}%`,
+            description: `Pass ${attempt}: ${label} - ${pct}%`,
             duration: Infinity,
           });
         };
 
-        // Execute conversion
-        await conv.execute();
+        await conversion.execute();
 
-        const buffer = target.buffer as ArrayBuffer;
-        const mime = outputFormat === "mp4-h264" ? "video/mp4" : "video/webm";
-        const blob = new Blob([buffer], { type: mime });
-        lastAttemptSize = blob.size;
-
+        const blob = new Blob([target.buffer as ArrayBuffer], { type: mime });
         console.log(
-          `Attempt ${i + 1} (${name}): ${formatFileSize(
-            blob.size
-          )} / ${formatFileSize(targetBytes)} target`
+          `Pass ${attempt} (${label}, ${videoCodec}): ${formatFileSize(blob.size)} / ${formatFileSize(targetBytes)}`
         );
 
-        // Check if this result meets the target size
-        if (blob.size < targetBytes) {
-          // Success! This quality level produces a file under the target size
-          const url = URL.createObjectURL(blob);
-          bestResult = { blob, url, quality: name };
+        if (!best || blob.size < best.blob.size) best = { blob, label };
+        if (blob.size <= targetBytes) break;
 
-          toast.success("Compression complete", {
-            id: "compress",
-            description: `${formatFileSize(blob.size)} with ${name} quality (${
-              i + 1
-            }/${qualityLevels.length} attempts)`,
-          });
-
-          break;
-        } else {
-          // File is still too large, try next quality level
-          if (i === qualityLevels.length - 1) {
-            // This was the last attempt, use it anyway
-            const url = URL.createObjectURL(blob);
-            bestResult = { blob, url, quality: name };
-
-            toast.warning("Compression complete", {
-              id: "compress",
-              description: `${formatFileSize(
-                blob.size
-              )} (exceeds ${targetSizeMB}MB target, used lowest quality)`,
-            });
-          } else {
-            // Continue to next quality level
-            console.log(
-              `File too large (${formatFileSize(
-                blob.size
-              )}), trying lower quality...`
-            );
-          }
-        }
+        plan = {
+          ...plan,
+          videoBitrate: correctVideoBitrate(plan, blob.size, targetBytes, durationSeconds),
+        };
       }
 
-      // Apply the best result
-      if (bestResult) {
-        replaceCompressedVideoUrl(bestResult.url);
-        setCompressedSize(bestResult.blob.size);
-        setRecordedMimeType(
-          outputFormat === "mp4-h264" ? "video/mp4" : "video/webm"
-        );
-        setProgress(100);
+      if (!best) throw new Error("Conversion produced no output.");
+
+      replaceCompressedVideoUrl(URL.createObjectURL(best.blob));
+      setCompressedSize(best.blob.size);
+      setRecordedMimeType(mime);
+      setCurrentQualityLevel(best.label);
+      setProgress(100);
+
+      if (best.blob.size <= targetBytes) {
+        toast.success("Compression complete", {
+          id: "compress",
+          description: `${formatFileSize(best.blob.size)} · ${best.label}`,
+        });
+      } else {
+        toast.warning("Compression complete", {
+          id: "compress",
+          description: `${formatFileSize(best.blob.size)} - still above ${targetSizeMB} MB`,
+        });
       }
     } catch (e: any) {
       console.error("Mediabunny conversion failed", e);

@@ -38,10 +38,10 @@
         "clsx": "^2.1.1",
         "cmdk": "1.0.4",
         "embla-carousel-react": "8.5.1",
-        "gifsicle-wasm-browser": "^1.5.19",
+        "gifsicle-wasm": "^1.96.4",
         "input-otp": "1.4.1",
         "lucide-react": "^0.454.0",
-        "mediabunny": "^1.13.0",
+        "mediabunny": "^1.64.0",
         "next": "15.1.0",
         "next-themes": "^0.4.6",
         "react": "^19",
@@ -431,7 +431,7 @@
 
     "get-nonce": ["get-nonce@1.0.1", "", {}, "sha512-FJhYRoDaiatfEkUK8HKlicmu/3SGFD51q3itKDGoSTysQJBnfOcxU5GxnhE1E6soB76MbT0MBtnKJuXyAx+96Q=="],
 
-    "gifsicle-wasm-browser": ["gifsicle-wasm-browser@1.5.19", "", {}, "sha512-f2j2QXvryrxake2DdeAaI96LfZ8adb62UUs9C2eNuQiTDiysh9aBPmyw1Q8fHe+x+is+RHXDEXvVQSELONwmhw=="],
+    "gifsicle-wasm": ["gifsicle-wasm@1.96.4", "", {}, "sha512-wbuyL1JPFjGZfnFX833us8T4TCPONWi/38Mates0C5QvCu4bRVm0o/WCDq4K5UY8EVNcdztNYYd1sySYUpI4Wg=="],
 
     "glob": ["glob@10.4.5", "", { "dependencies": { "foreground-child": "^3.1.0", "jackspeak": "^3.1.2", "minimatch": "^9.0.4", "minipass": "^7.1.2", "package-json-from-dist": "^1.0.0", "path-scurry": "^1.11.1" }, "bin": "dist/esm/bin.mjs" }, "sha512-7Bv8RF0k6xjo7d4A/PxYLbUCfb6c+Vpd2/mB2yRDlew7Jb5hEXiCD9ibfO7wpk8i4sevK6DFny9h7EYbM3/sHg=="],
 
@@ -477,7 +477,7 @@
 
     "lucide-react": ["lucide-react@0.454.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0-rc" } }, "sha512-hw7zMDwykCLnEzgncEEjHeA6+45aeEzRYuKHuyRSOPkhko+J3ySGjGIzu+mmMfDFG1vazHepMaYFYHbTFAZAAQ=="],
 
-    "mediabunny": ["mediabunny@1.13.0", "", { "dependencies": { "@types/dom-mediacapture-transform": "^0.1.11", "@types/dom-webcodecs": "0.1.13" } }, "sha512-eAtCVOzceN3VkExQmYrDB+3bM6d98PfB6AhgueojYG6T5SNzc4cRR2gWm0oZ1HjhNN0J4hjtvtEpJ+AAMXF/dQ=="],
+    "mediabunny": ["mediabunny@1.64.0", "", { "dependencies": { "@types/dom-mediacapture-transform": "^0.1.11", "@types/dom-webcodecs": "0.1.13" } }, "sha512-ILat5qSwfmZjnYhk7Dc8uEvEQNtzXNxUVyfxR9Fp6JRa8Axsg5xE1EXwCTOzXJHhH/a2eyk6sZ1ffivCk4rIXg=="],
 
     "merge2": ["merge2@1.4.1", "", {}, "sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg=="],
 

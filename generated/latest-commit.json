@@ -1,9 +1,9 @@
 {
   "branch": "main",
-  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/880646d4ec811e93883d9ceeb42bfc111b8e1f2d",
-  "committedAt": "2026-03-13T23:07:22Z",
-  "fullHash": "880646d4ec811e93883d9ceeb42bfc111b8e1f2d",
+  "commitUrl": "https://github.com/Wilsman/shrinkme/commit/08c6413ef0faab1c01ca9b47499481f2919c8b00",
+  "committedAt": "2026-10-05T22:36:23+01:00",
+  "fullHash": "08c6413ef0faab1c01ca9b47499481f2919c8b00",
   "repoUrl": "https://github.com/Wilsman/shrinkme",
-  "shortHash": "880646d",
-  "subject": "Update latest commit metadata JSON"
+  "shortHash": "08c6413",
+  "subject": "Fix blank video preview in the editor stage"
 }
